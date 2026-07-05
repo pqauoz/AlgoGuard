@@ -1,0 +1,14 @@
+Overall Rank,Model,Prediction Time (s),Model Size (MB),Average Efficiency Rank
+1,Naive_Bayes,0.0788,0.0052,1.0
+2,Random_Forest,0.1375,55.9241,3.0
+3,Gradient_Boosting,0.2132,0.1336,3.0
+4,AdaBoost,2.3568,0.0624,5.0
+5,Soft_Voting,0.8573,112.2414,5.0
+6,Stacking_Top3_LR,1.3906,112.2422,6.5
+7,Stacking_Top3_GB,0.9578,112.3757,6.5
+8,Stacking_Top3_RF,1.5422,175.0887,8.0
+9,KNN,11.765,73.4218,9.0
+10,Hard_Voting,7.741,258.9584,9.5
+11,Stacking_All_GB,8.7564,259.2293,11.0
+12,Stacking_All_LR,9.1714,259.0952,11.5
+13,Stacking_All_RF,9.1572,320.5455,12.0
