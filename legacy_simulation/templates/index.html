@@ -1,11 +1,11 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AlgoGuard - Intrusion Detection Dashboard</title>
+    <title>AlgoGuard Legacy Simulation</title>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f7f6; margin: 0; padding: 20px; color: #333; }
+        body { font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f7f6; margin: 0; padding: 20px; color: #333; }
         .container { max-width: 800px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
         h1 { text-align: center; color: #2c3e50; margin-bottom: 10px; }
         h2 { text-align: center; color: #7f8c8d; font-weight: normal; margin-top: 0; }
@@ -22,10 +22,9 @@
     </style>
 </head>
 <body>
-
 <div class="container">
-    <h1>️ AlgoGuard</h1>
-    <h2>Real-Time Network Intrusion Detection</h2>
+    <h1>AlgoGuard</h1>
+    <h2>Legacy Manual Traffic Simulation</h2>
 
     <form id="detectForm">
         <div class="form-grid">
@@ -42,7 +41,7 @@
                 <input type="number" name="spkts" value="12" required>
             </div>
             <div class="form-group">
-                <label>Dest Packets</label>
+                <label>Destination Packets</label>
                 <input type="number" name="dpkts" value="8" required>
             </div>
             <div class="form-group">
@@ -50,7 +49,7 @@
                 <input type="number" name="sbytes" value="1500" required>
             </div>
             <div class="form-group">
-                <label>Dest Bytes</label>
+                <label>Destination Bytes</label>
                 <input type="number" name="dbytes" value="800" required>
             </div>
             <div class="form-group">
@@ -58,7 +57,7 @@
                 <input type="number" name="sttl" value="64" required>
             </div>
             <div class="form-group">
-                <label>Dest TTL</label>
+                <label>Destination TTL</label>
                 <input type="number" name="dttl" value="64" required>
             </div>
             <div class="form-group">
@@ -86,42 +85,40 @@
 </div>
 
 <script>
-    document.getElementById('detectForm').addEventListener('submit', async function(e) {
+    document.getElementById("detectForm").addEventListener("submit", async function(e) {
         e.preventDefault();
         const formData = new FormData(this);
         const data = Object.fromEntries(formData.entries());
-        
-        // Convert numbers
-        ['dur', 'rate', 'spkts', 'dpkts', 'sbytes', 'dbytes', 'sttl', 'dttl'].forEach(key => {
+
+        ["dur", "rate", "spkts", "dpkts", "sbytes", "dbytes", "sttl", "dttl"].forEach(key => {
             data[key] = parseFloat(data[key]);
         });
 
         try {
-            const response = await fetch('/predict', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+            const response = await fetch("/predict", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(data)
             });
             const result = await response.json();
-            
-            const resultBox = document.getElementById('resultBox');
-            resultBox.style.display = 'block';
-            
-            if (result.status === 'success') {
-                resultBox.className = 'result-box ' + (result.prediction === 'Attack' ? 'attack' : 'normal');
+
+            const resultBox = document.getElementById("resultBox");
+            resultBox.style.display = "block";
+
+            if (result.status === "success") {
+                resultBox.className = "result-box " + (result.prediction === "Attack" ? "attack" : "normal");
                 resultBox.innerHTML = `
-                    <h3>${result.prediction === 'Attack' ? '🚨 ATTACK DETECTED' : '✅ Normal Traffic'}</h3>
+                    <h3>${result.prediction === "Attack" ? "ATTACK DETECTED" : "Normal Traffic"}</h3>
                     <div class="confidence">Model Confidence: <strong>${result.confidence}%</strong></div>
                 `;
             } else {
-                resultBox.className = 'result-box attack';
-                resultBox.innerHTML = `<h3>⚠️ System Error</h3><p>${result.message}</p>`;
+                resultBox.className = "result-box attack";
+                resultBox.innerHTML = `<h3>System Error</h3><p>${result.message}</p>`;
             }
         } catch (error) {
-            alert('Failed to connect to AlgoGuard server.');
+            alert("Failed to connect to AlgoGuard server.");
         }
     });
 </script>
-
 </body>
 </html>

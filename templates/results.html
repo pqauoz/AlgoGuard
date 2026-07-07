@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+
+{% block title %}Results | AlgoGuard{% endblock %}
+
+{% block content %}
+<section class="dashboard-header compact">
+    <div>
+        <p class="eyebrow">Evaluation Results</p>
+        <h1>Model Performance</h1>
+        <p class="header-copy">{{ latest_run.filename }} processed {{ latest_run.uploaded_at }}</p>
+    </div>
+    <a class="btn btn-outline-light" href="{{ url_for('upload_dataset') }}">
+        <i class="bi bi-arrow-repeat"></i>
+        New Run
+    </a>
+</section>
+
+<section class="metric-grid">
+    <div class="metric-card success">
+        <span class="metric-label">Best Model</span>
+        <strong>{{ latest_run.best_model.model_name }}</strong>
+        <small>{{ latest_run.best_model.f1_score }}% F1-score</small>
+    </div>
+    <div class="metric-card">
+        <span class="metric-label">Normal Traffic</span>
+        <strong>{{ latest_run.dataset.normal_count }}</strong>
+        <small>Original dataset labels</small>
+    </div>
+    <div class="metric-card warning">
+        <span class="metric-label">Anomaly Count</span>
+        <strong>{{ latest_run.dataset.anomaly_count }}</strong>
+        <small>Original dataset labels</small>
+    </div>
+    <div class="metric-card">
+        <span class="metric-label">Report</span>
+        <strong>{{ latest_run.report_name }}</strong>
+        <small>Saved in reports folder</small>
+    </div>
+</section>
+
+<section class="panel">
+    <div class="panel-heading">
+        <div>
+            <p class="eyebrow">Comparison Table</p>
+            <h2>Ensemble Model Metrics</h2>
+        </div>
+        <span class="status-pill active">{{ latest_run.dataset.test_rows }} test rows</span>
+    </div>
+
+    <div class="table-responsive">
+        <table class="table table-dark table-hover align-middle results-table">
+            <thead>
+                <tr>
+                    <th>Model</th>
+                    <th>Accuracy</th>
+                    <th>Precision</th>
+                    <th>Recall</th>
+                    <th>F1-score</th>
+                    <th>FPR</th>
+                    <th>Processing Time</th>
+                    <th>Predicted Normal</th>
+                    <th>Predicted Anomaly</th>
+                    <th>Saved Model</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for result in latest_run.model_results %}
+                <tr class="{% if result.model_name == latest_run.best_model.model_name %}best-row{% endif %}">
+                    <td>
+                        <strong>{{ result.model_name }}</strong>
+                        {% if result.model_name == latest_run.best_model.model_name %}
+                            <span class="best-badge">Best</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ result.accuracy }}%</td>
+                    <td>{{ result.precision }}%</td>
+                    <td>{{ result.recall }}%</td>
+                    <td>{{ result.f1_score }}%</td>
+                    <td>{{ result.false_positive_rate }}%</td>
+                    <td>{{ result.processing_time }}s</td>
+                    <td>{{ result.predicted_normal_count }}</td>
+                    <td>{{ result.predicted_anomaly_count }}</td>
+                    <td>{{ result.model_file }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<section class="details-grid">
+    <div class="panel">
+        <div class="panel-heading">
+            <div>
+                <p class="eyebrow">Dataset Summary</p>
+                <h2>Training Details</h2>
+            </div>
+        </div>
+        <dl class="detail-list">
+            <div><dt>Rows</dt><dd>{{ latest_run.dataset.rows }}</dd></div>
+            <div><dt>Features</dt><dd>{{ latest_run.dataset.features }}</dd></div>
+            <div><dt>Target Column</dt><dd>{{ latest_run.dataset.target_column }}</dd></div>
+            <div><dt>Classes</dt><dd>{{ latest_run.dataset.class_count }}</dd></div>
+            <div><dt>Training Rows</dt><dd>{{ latest_run.dataset.train_rows }}</dd></div>
+            <div><dt>Testing Rows</dt><dd>{{ latest_run.dataset.test_rows }}</dd></div>
+            <div><dt>Numeric Features</dt><dd>{{ latest_run.dataset.numeric_features }}</dd></div>
+            <div><dt>Categorical Features</dt><dd>{{ latest_run.dataset.categorical_features }}</dd></div>
+        </dl>
+    </div>
+
+    <div class="panel">
+        <div class="panel-heading">
+            <div>
+                <p class="eyebrow">Target Distribution</p>
+                <h2>Label Counts</h2>
+            </div>
+        </div>
+        <div class="label-list">
+            {% for label, count in latest_run.dataset.label_counts.items() %}
+                <div>
+                    <span>{{ label }}</span>
+                    <strong>{{ count }}</strong>
+                </div>
+            {% endfor %}
+        </div>
+    </div>
+</section>
+{% endblock %}

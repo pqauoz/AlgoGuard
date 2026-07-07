@@ -1,216 +1,252 @@
 # AlgoGuard
 
-*AlgoGuard* is a lightweight machine learning-based network anomaly detection framework designed for *resource-constrained organizations*. It provides an easy-to-use web dashboard for analyzing network traffic and detecting anomalous behavior using a stacked ensemble machine learning model.
+AlgoGuard is a Flask-based research prototype for lightweight network anomaly detection. It is designed as a capstone-friendly simulation system for analyzing CSV network traffic datasets, training ensemble machine learning models, comparing their performance, and running a manual traffic-flow demo.
+
+The current version is a simulation/prototype. It analyzes uploaded datasets or manually entered traffic-flow values. It does not capture live packets, monitor a real network continuously, or block threats automatically.
 
 ---
 
-# Features
+## Features
 
-- Lightweight and easy to deploy
-- Machine learning-based anomaly detection
-- Flask web dashboard
-- Prediction using a stacked ensemble model
-- Automatic model extraction on first run
-- Designed for small organizations with limited computing resources
-
----
-
-# System Requirements
-
-Before installing AlgoGuard, make sure your computer has the following software installed:
-
-- *Python 3.8 or higher*
-  https://www.python.org/downloads/
-
-- *Git*
-  https://git-scm.com/downloads
+- Dark cybersecurity dashboard
+- CSV dataset upload
+- Automatic preprocessing
+- Categorical feature encoding
+- Numerical feature scaling
+- Train/test split
+- Ensemble model training and comparison
+- Manual single-flow simulation demo using pretrained model artifacts
+- Performance metrics table
+- Normal traffic and anomaly counts
+- Best model identification
+- Joblib model saving
+- Basic report export
 
 ---
 
-# Installation
+## Models
 
-## 1. Clone the Repository
+The main dataset workflow trains and compares:
 
-Open Command Prompt or Terminal and run:
+- Random Forest
+- Gradient Boosting
+- Voting Classifier
 
+The simulation demo uses the pretrained model artifacts in `legacy_simulation/`.
+
+---
+
+## Metrics
+
+AlgoGuard displays:
+
+- Accuracy
+- Precision
+- Recall
+- F1-score
+- False Positive Rate
+- Processing Time
+- Predicted normal count
+- Predicted anomaly count
+
+---
+
+## Project Structure
+
+```text
+AlgoGuard/
+|-- app.py
+|-- requirements.txt
+|-- services/
+|   |-- preprocessing_service.py
+|   |-- training_service.py
+|   |-- evaluation_service.py
+|   `-- simulation_service.py
+|-- templates/
+|   |-- base.html
+|   |-- dashboard.html
+|   |-- upload.html
+|   |-- results.html
+|   `-- simulation.html
+|-- static/
+|   |-- css/
+|   |   `-- style.css
+|   `-- js/
+|-- uploads/
+|-- saved_models/
+|-- reports/
+|-- legacy_simulation/
+|   |-- app.py
+|   |-- feature_extractor.py
+|   |-- flow_builder.py
+|   |-- model_loader.py
+|   |-- predictor.py
+|   |-- preprocessor.py
+|   `-- templates/
+|-- dataset/
+|-- models/
+|-- notebooks/
+`-- results/
+```
+
+---
+
+## Folder Guide
+
+- `app.py`: main Flask application entrypoint.
+- `services/`: preprocessing, training, evaluation, and simulation logic.
+- `templates/`: pages used by the main Flask app.
+- `static/`: CSS and JavaScript assets.
+- `uploads/`: temporary uploaded CSV files.
+- `saved_models/`: Joblib models created by the training workflow.
+- `reports/`: CSV reports created after model comparison.
+- `legacy_simulation/`: older pretrained manual prediction demo files used by the Simulation page.
+- `dataset/`, `models/`, `notebooks/`, `results/`: research and experiment artifacts.
+
+---
+
+## System Requirements
+
+- Python 3.8 or higher
+- Git
+
+---
+
+## Installation
+
+Clone the repository:
+
+```bash
 git clone https://github.com/pqauoz/AlgoGuard.git
 cd AlgoGuard
+```
 
----
+Create and activate a virtual environment:
 
-## 2. Create a Virtual Environment
-
-### Windows
-
+```bash
 python -m venv venv
 venv\Scripts\activate
+```
+
+Install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
 
 ---
 
-## 3. Install the Required Packages
+## Running the Application
 
-Install all required Python libraries:
+Start the main Flask app from the project root:
 
-pip install flask scikit-learn pandas numpy joblib
-
----
-
-# Running the Application
-
-Navigate to the application folder:
-
-cd app
-
-Start the Flask server:
-
+```bash
 python app.py
+```
 
-During the first execution, AlgoGuard will automatically extract the compressed machine learning model. This process only happens once and usually takes around *5 seconds or maybe longer*.
+Open:
 
-After the server starts, open your browser and visit:
-
+```text
 http://localhost:5000
+```
+
+If port 5000 is already in use:
+
+```bash
+set ALGOGUARD_PORT=5001
+python app.py
+```
+
+Then open:
+
+```text
+http://localhost:5001
+```
 
 ---
 
-# Using AlgoGuard
+## Using AlgoGuard
 
-The web dashboard allows users to manually input network traffic features and analyze whether the traffic is normal or anomalous.
+### Dataset Mode
 
-### Test Normal Traffic
+1. Open the Upload page.
+2. Upload a CSV network traffic dataset.
+3. Make sure the final column is the target label.
+4. AlgoGuard preprocesses the data automatically.
+5. AlgoGuard trains and compares the three ensemble models.
+6. Results are displayed in a table and trained models are saved in `saved_models/`.
 
-Input:
+### Simulation Demo
+
+Open the Simulation page to manually enter one network traffic flow and test it against the pretrained model artifacts in `legacy_simulation/`.
+
+Example normal-style input:
 
 | Feature | Value |
-|---------|------|
+| --- | --- |
 | Duration | 0.001 |
 | Rate | 15 |
 | Protocol | tcp |
 | State | CON |
 
-*Expected Result*
-
-Normal Traffic
-
----
-
-### Test Attack Traffic
-
-Input:
+Example attack-style input:
 
 | Feature | Value |
-|---------|------|
+| --- | --- |
 | Duration | 0.000001 |
 | Rate | 5000 |
 | Protocol | tcp |
 | State | REQ |
 
-*Expected Result*
-Attack Detected
+---
 
+## Simulation Scope
+
+AlgoGuard is currently a research prototype and simulation. It demonstrates how machine learning can detect anomalous traffic patterns from prepared data.
+
+This version does not:
+
+- Capture live packets from a real network
+- Monitor routers, switches, or endpoints continuously
+- Block attacks
+- Send alerts to security tools
+- Replace a production IDS or IPS
+
+Future work could add live packet capture, scheduled monitoring, alerting, and deployment features for real network environments.
 
 ---
 
-# Project Structure
+## Troubleshooting
 
-AlgoGuard/
-│
-├── app/
-│   ├── app.py
-│   ├── templates/
-│   ├── static/
-│   ├── models/
-│   └── Stacking_Top3_GB.zip
-│
-├── dataset/
-│
-├── training/
-│
-├── README.md
-│
-└── requirements.txt
+### ModuleNotFoundError
 
----
+Activate your virtual environment and reinstall dependencies:
 
-# Machine Learning Model
-
-AlgoGuard uses a *Stacked Ensemble Learning* approach consisting of:
-
-### Base Learners
-
-- Random Forest
-- AdaBoost
-- Gradient Boosting
-
-### Meta Learner
-
-- Gradient Boosting
-
-This ensemble combines predictions from multiple models to improve anomaly detection accuracy while maintaining lightweight performance suitable for deployment on low-resource systems.
-
----
-
-# Troubleshooting
-
-## ModuleNotFoundError
-
-If you receive an error similar to:
-
-text
-ModuleNotFoundError
-
-Activate the virtual environment first:
-
-### Windows
-
+```bash
 venv\Scripts\activate
+pip install -r requirements.txt
+```
 
-Then reinstall the required packages:
+### Invalid CSV
 
-pip install flask scikit-learn pandas numpy joblib
+The uploaded file must:
 
----
+- Be a `.csv` file
+- Contain at least one feature column
+- Use the last column as the target label
+- Contain at least two target classes
+- Have enough rows to split into training and testing sets
 
-## Port 5000 Already in Use
+### Model File Not Found
 
-If Flask reports that port *5000* is already being used:
+The Simulation page uses legacy pretrained artifacts. Confirm these files exist in `legacy_simulation/`:
 
-Open:
-
-app/app.py
-
-Find:
-
-port=5000
-
-Change it to:
-
-port=5001
-
-Run the application again and open:
-
-http://localhost:5001
+- `Stacking_Top3_GB.pkl` or `Stacking_Top3_GB.zip`
+- `scaler.pkl`
+- `encoded_columns.npy`
 
 ---
 
-## Model File Not Found
+## License
 
-If the application cannot find the machine learning model:
-
-- Verify that *Stacking_Top3_GB.zip* is located inside the *app/* directory.
-- Restart the application.
-- The model will automatically be extracted during startup.
-
----
-
-# Developers
-
-Developed as part of a research project (currenlty just the simulation):
-
-*AlgoGuard: A Lightweight Framework for Local Network Anomaly Detection in Resource-Constrained Organizations*
-
----
-
-# License
-
-This project is intended for *academic and research purposes*.
+This project is intended for academic and research purposes.

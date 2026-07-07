@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+
+{% block title %}Upload Dataset | AlgoGuard{% endblock %}
+
+{% block content %}
+<section class="dashboard-header compact">
+    <div>
+        <p class="eyebrow">Dataset Intake</p>
+        <h1>Upload Network Traffic</h1>
+        <p class="header-copy">CSV files are preprocessed automatically before model training.</p>
+    </div>
+</section>
+
+<section class="upload-layout">
+    <form class="upload-panel" method="post" enctype="multipart/form-data">
+        <label for="dataset" class="upload-dropzone">
+            <i class="bi bi-filetype-csv"></i>
+            <span>Choose CSV dataset</span>
+            <small>The final column is used as the target label.</small>
+        </label>
+        <input class="form-control" type="file" id="dataset" name="dataset" accept=".csv" required>
+
+        <div class="upload-checks">
+            <div><i class="bi bi-check-circle"></i> Encodes categorical features</div>
+            <div><i class="bi bi-check-circle"></i> Scales numerical features</div>
+            <div><i class="bi bi-check-circle"></i> Saves trained Joblib pipelines</div>
+        </div>
+
+        <button class="btn btn-accent w-100" type="submit">
+            <i class="bi bi-cpu"></i>
+            Train Models
+        </button>
+    </form>
+
+    <aside class="panel">
+        <div class="panel-heading">
+            <div>
+                <p class="eyebrow">Training Set</p>
+                <h2>Required CSV Format</h2>
+            </div>
+        </div>
+        <div class="schema-list">
+            <div>
+                <strong>Feature columns</strong>
+                <span>Numeric or categorical network traffic fields.</span>
+            </div>
+            <div>
+                <strong>Target label</strong>
+                <span>The last column should contain normal and anomaly labels.</span>
+            </div>
+            <div>
+                <strong>Minimum data</strong>
+                <span>At least two target classes and two rows per class.</span>
+            </div>
+        </div>
+    </aside>
+</section>
+{% endblock %}

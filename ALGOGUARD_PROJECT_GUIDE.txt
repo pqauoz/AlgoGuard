@@ -1,0 +1,511 @@
+ALGOGUARD PROJECT GUIDE
+=======================
+
+This file explains the current AlgoGuard project in simple terms.
+
+
+1. WHAT ALGOGUARD IS
+--------------------
+
+AlgoGuard is a Flask web application for network anomaly detection.
+
+In this project, "anomaly detection" means the system tries to identify
+whether network traffic looks normal or suspicious/attack-like.
+
+AlgoGuard is currently a simulation/prototype. That means it does not watch
+your real Wi-Fi or LAN traffic live. Instead, it works with:
+
+1. CSV datasets uploaded by the user.
+2. Manual traffic-flow values entered in the Simulation page.
+
+This is normal for a capstone/research project because it demonstrates the
+machine learning workflow without needing real packet capture or deployment.
+
+
+2. MAIN APPLICATION ENTRYPOINT
+------------------------------
+
+The main file to run is:
+
+app.py
+
+Run the project from the root folder:
+
+python app.py
+
+Then open:
+
+http://localhost:5000
+
+Important:
+There used to be an app/app.py file. That old app folder was cleaned up and
+renamed to legacy_simulation/. If VS Code still has app/app.py open, close
+that tab because it is an old path.
+
+
+3. CURRENT PROJECT STRUCTURE
+----------------------------
+
+The cleaned structure is:
+
+AlgoGuard/
+|-- app.py
+|-- requirements.txt
+|-- README.md
+|-- ALGOGUARD_PROJECT_GUIDE.txt
+|-- services/
+|-- templates/
+|-- static/
+|-- uploads/
+|-- saved_models/
+|-- reports/
+|-- legacy_simulation/
+|-- dataset/
+|-- models/
+|-- notebooks/
+`-- results/
+
+
+4. WHAT EACH FOLDER DOES
+------------------------
+
+app.py
+    This is the main Flask app. It defines the website routes:
+    - Dashboard
+    - Upload
+    - Results
+    - Simulation
+    - Predict API
+
+services/
+    This folder contains the main Python logic so app.py does not become too
+    messy.
+
+    preprocessing_service.py
+        Loads the CSV dataset, checks if it is valid, separates features and
+        target labels, encodes categorical columns, scales numerical columns,
+        and splits the data into training/testing sets.
+
+    training_service.py
+        Trains the three ensemble models:
+        - Random Forest
+        - Gradient Boosting
+        - Voting Classifier
+
+        It also saves trained model pipelines as Joblib files.
+
+    evaluation_service.py
+        Calculates performance metrics:
+        - Accuracy
+        - Precision
+        - Recall
+        - F1-score
+        - False Positive Rate
+        - Processing Time
+
+    simulation_service.py
+        Connects the new main app to the old pretrained manual prediction
+        files inside legacy_simulation/.
+
+templates/
+    This folder contains HTML pages:
+    - base.html
+    - dashboard.html
+    - upload.html
+    - results.html
+    - simulation.html
+
+static/
+    This folder contains design files.
+
+    static/css/style.css
+        Main dark cybersecurity dashboard styling.
+
+uploads/
+    Uploaded CSV files temporarily go here.
+    Generated files are ignored by Git.
+
+saved_models/
+    Newly trained Joblib models are saved here.
+    Generated model files are ignored by Git.
+
+reports/
+    CSV result reports are saved here.
+    Generated reports are ignored by Git.
+
+legacy_simulation/
+    This contains the older manual prediction prototype and pretrained model
+    assets. It is used by the Simulation page.
+
+dataset/
+    Research/training datasets and processed arrays.
+
+models/
+    Existing research model artifacts.
+
+notebooks/
+    Jupyter notebooks used for experiments and research.
+
+results/
+    Research result CSV files.
+
+venv/
+    Python virtual environment. This should not be edited manually.
+
+
+5. WEBSITE PAGES
+----------------
+
+Dashboard Page
+    URL:
+    http://localhost:5000/
+
+    Shows the system name, latest dataset summary, normal/anomaly counts,
+    best model, and model comparison snapshot after training.
+
+Upload Page
+    URL:
+    http://localhost:5000/upload
+
+    Lets the user upload a CSV dataset.
+
+    Requirement:
+    The last column of the CSV must be the target label.
+
+    Example:
+
+    dur,rate,proto,state,sbytes,dbytes,label
+    0.10,12,tcp,CON,500,420,normal
+    0.01,5000,tcp,REQ,2000,60,attack
+
+Results Page
+    URL:
+    http://localhost:5000/results
+
+    Shows the model comparison table after a dataset is uploaded and trained.
+    If no dataset has been uploaded yet, it redirects back to the Upload page.
+
+Simulation Page
+    URL:
+    http://localhost:5000/simulation
+
+    Lets the user manually enter one network flow and predict whether it is
+    Normal or Attack using the pretrained legacy model.
+
+
+6. DATASET WORKFLOW
+-------------------
+
+When a user uploads a CSV file:
+
+1. Flask receives the file in app.py.
+2. The file is saved into uploads/.
+3. preprocessing_service.py reads the CSV using Pandas.
+4. The last column is treated as the target label.
+5. Feature columns are separated from the target label.
+6. Numerical columns are scaled.
+7. Categorical columns are encoded.
+8. The dataset is split into training and testing sets.
+9. training_service.py trains:
+   - Random Forest
+   - Gradient Boosting
+   - Voting Classifier
+10. evaluation_service.py calculates metrics.
+11. The best model is selected.
+12. Trained models are saved into saved_models/.
+13. A report is saved into reports/.
+14. The Results page displays the metrics table.
+
+
+7. WHAT "LAST COLUMN IS THE TARGET LABEL" MEANS
+-----------------------------------------------
+
+The app assumes the final column in the uploaded CSV is the answer/class.
+
+For example:
+
+dur,rate,proto,state,label
+0.001,15,tcp,CON,normal
+0.000001,5000,tcp,REQ,attack
+
+Here, "label" is the target column because it is last.
+
+The target column should contain at least two classes, such as:
+
+normal
+attack
+
+or:
+
+0
+1
+
+
+8. MACHINE LEARNING MODELS
+--------------------------
+
+Random Forest
+    A model made of many decision trees. It is strong, reliable, and commonly
+    used for classification.
+
+Gradient Boosting
+    A model that builds trees one after another, where each new tree tries to
+    fix mistakes from the previous ones.
+
+Voting Classifier
+    A model that combines several models and chooses the final prediction based
+    on their votes/probabilities.
+
+
+9. PERFORMANCE METRICS
+----------------------
+
+Accuracy
+    Percentage of total predictions that were correct.
+
+Precision
+    Of the records predicted as a class, how many were actually correct.
+
+Recall
+    Of the real records in a class, how many the model found.
+
+F1-score
+    A balance between precision and recall.
+
+False Positive Rate
+    How often normal traffic is incorrectly flagged as attack/anomaly.
+
+Processing Time
+    How long training and prediction took for that model.
+
+
+10. SIMULATION MODE
+-------------------
+
+Simulation mode is different from dataset training.
+
+Dataset mode:
+    Uploads a CSV, trains models, compares results.
+
+Simulation mode:
+    Enters one traffic flow manually and predicts Normal or Attack using the
+    pretrained legacy model.
+
+Simulation mode uses files inside:
+
+legacy_simulation/
+
+Important files:
+
+legacy_simulation/Stacking_Top3_GB.pkl
+legacy_simulation/scaler.pkl
+legacy_simulation/encoded_columns.npy
+legacy_simulation/preprocessor.py
+legacy_simulation/predictor.py
+
+
+11. WHY THIS IS CALLED A SIMULATION
+-----------------------------------
+
+It is called a simulation because the app does not capture real-time network
+packets from a live network.
+
+It does not:
+
+- Monitor your router
+- Capture live LAN traffic
+- Block attacks
+- Send real security alerts
+- Replace a production IDS/IPS
+
+It does:
+
+- Analyze CSV datasets
+- Train machine learning models
+- Compare model performance
+- Simulate single-flow prediction
+- Demonstrate the research idea
+
+
+12. HOW TO RUN THE PROJECT
+--------------------------
+
+Step 1:
+Open a terminal in:
+
+C:\Users\sanmi\AlgoGuard
+
+Step 2:
+Activate the virtual environment:
+
+venv\Scripts\activate
+
+Step 3:
+Run:
+
+python app.py
+
+Step 4:
+Open:
+
+http://localhost:5000
+
+
+13. IF PORT 5000 IS ALREADY USED
+--------------------------------
+
+Run:
+
+set ALGOGUARD_PORT=5001
+python app.py
+
+Then open:
+
+http://localhost:5001
+
+
+14. COMMON ERRORS
+-----------------
+
+ModuleNotFoundError
+    The virtual environment is probably not active, or dependencies are not
+    installed.
+
+    Fix:
+    venv\Scripts\activate
+    pip install -r requirements.txt
+
+VS Code shows red import errors
+    VS Code may be using the wrong Python interpreter.
+
+    Fix:
+    Use "Python: Select Interpreter" and choose:
+    .\venv\Scripts\python.exe
+
+app/app.py cannot be found
+    That old folder was renamed during cleanup.
+
+    Use:
+    app.py
+
+    Or for old manual simulation files:
+    legacy_simulation/app.py
+
+Invalid CSV file
+    Make sure:
+    - The file ends in .csv
+    - It has feature columns
+    - The last column is the target label
+    - The target has at least two classes
+
+Model file not found
+    The Simulation page needs pretrained legacy model files in:
+    legacy_simulation/
+
+
+15. WHAT FILES YOU SHOULD EDIT MOST OFTEN
+-----------------------------------------
+
+For routes or app behavior:
+    app.py
+
+For preprocessing:
+    services/preprocessing_service.py
+
+For model training:
+    services/training_service.py
+
+For metrics:
+    services/evaluation_service.py
+
+For simulation/pretrained model connection:
+    services/simulation_service.py
+
+For page layout:
+    templates/*.html
+
+For design:
+    static/css/style.css
+
+For documentation:
+    README.md
+    ALGOGUARD_PROJECT_GUIDE.txt
+
+
+16. WHAT FILES TO AVOID EDITING MANUALLY
+----------------------------------------
+
+Avoid editing:
+
+venv/
+    This is the Python virtual environment.
+
+__pycache__/
+    These are generated Python cache files.
+
+uploads/
+saved_models/
+reports/
+    These contain runtime-generated outputs.
+
+large .pkl and .npy files
+    These are model/data artifacts. Edit only if you know exactly why.
+
+
+17. QA STATUS
+-------------
+
+Recent QA checks passed:
+
+- Syntax checks
+- Dependency import checks
+- Dashboard route
+- Upload route
+- Simulation route
+- Results redirect behavior
+- Invalid upload handling
+- CSV upload and training workflow
+- Predict API
+- Runtime folder cleanliness
+- Ignore rule checks
+
+The app was verified running at:
+
+http://127.0.0.1:5000
+
+
+18. SIMPLE EXPLANATION FOR DEFENSE OR PRESENTATION
+--------------------------------------------------
+
+AlgoGuard is a lightweight Flask-based network anomaly detection prototype.
+It allows a user to upload a CSV network traffic dataset, automatically
+preprocesses the data, trains three ensemble machine learning models, compares
+their performance, and identifies the best model. It also includes a manual
+simulation page where a single traffic flow can be tested using pretrained
+model artifacts. The system is intended for academic and research use and is
+currently a simulation rather than a live network monitoring tool.
+
+
+19. SHORT VERSION
+-----------------
+
+Run:
+
+python app.py
+
+Open:
+
+http://localhost:5000
+
+Use:
+
+Upload page:
+    Train and compare models from a CSV dataset.
+
+Simulation page:
+    Test one manual traffic flow.
+
+Remember:
+    This is a capstone prototype/simulation, not a live packet-monitoring
+    security product yet.
+
