@@ -1,0 +1,894 @@
+ALGOGUARD USER MANUAL AND DATA GUIDE
+====================================
+
+This guide explains how to use AlgoGuard from start to finish, including what
+data to upload, what values to put in the Simulation page, and what happens if
+the system detects an anomaly.
+
+
+1. WHAT ALGOGUARD DOES
+----------------------
+
+AlgoGuard is a web application that demonstrates network anomaly detection.
+
+It has two main modes:
+
+1. Dataset Mode
+   Upload a CSV dataset, train machine learning models, compare the results,
+   and identify the best model.
+
+2. Simulation Mode
+   Type one network traffic example manually and let the pretrained model
+   classify it as Normal or Attack.
+
+Important:
+AlgoGuard is a simulation/prototype. It does not capture live network packets
+from your Wi-Fi or LAN. It analyzes CSV files and manual inputs.
+
+
+2. HOW TO RUN ALGOGUARD
+-----------------------
+
+Open a terminal in the project folder:
+
+C:\Users\Client\Documents\AlgoGuard
+
+Then run:
+
+venv\Scripts\activate
+python -m pip install -r requirements.txt
+python app.py
+
+Then open:
+
+http://localhost:5000
+
+If port 5000 is busy:
+
+set ALGOGUARD_PORT=5001
+python app.py
+
+Then open:
+
+http://localhost:5001
+
+
+3. WEBSITE PAGES
+----------------
+
+Dashboard
+    Shows the AlgoGuard overview, latest dataset result, normal/anomaly
+    counts, and best model after training.
+
+Upload
+    Uploads a CSV dataset and trains models.
+
+Results
+    Shows the model comparison table after dataset training.
+
+Simulation
+    Lets you manually type one network flow and predict if it is Normal or
+    Attack.
+
+
+4. DATASET MODE: WHAT CSV DATA TO PUT
+-------------------------------------
+
+The uploaded file must be a CSV file.
+
+The last column must be the target label.
+
+Example:
+
+dur,rate,proto,state,sbytes,dbytes,label
+0.10,12,tcp,CON,500,420,normal
+0.01,5000,tcp,REQ,2000,60,attack
+
+In this example:
+
+Features:
+    dur
+    rate
+    proto
+    state
+    sbytes
+    dbytes
+
+Target label:
+    label
+
+The target label is the answer that tells the model whether the row is normal
+or attack/anomaly.
+
+
+5. SIMPLE SAMPLE CSV YOU CAN TEST
+---------------------------------
+
+You can create a file named sample_network_traffic.csv with this content:
+
+dur,rate,proto,state,spkts,dpkts,sbytes,dbytes,sttl,dttl,label
+0.10,12,tcp,CON,12,9,500,420,64,64,normal
+0.20,10,udp,CON,14,8,520,430,64,64,normal
+0.15,11,tcp,FIN,11,10,480,390,64,64,normal
+0.12,14,udp,CON,13,9,510,405,64,64,normal
+0.11,13,tcp,CON,12,8,505,415,64,64,normal
+0.18,9,udp,FIN,15,11,530,440,64,64,normal
+0.01,5000,tcp,REQ,1,1,2000,60,254,0,attack
+0.02,4500,tcp,INT,1,1,1900,55,254,0,attack
+0.01,4800,udp,REQ,1,1,2100,65,254,0,attack
+0.03,5200,tcp,INT,1,1,2200,70,254,0,attack
+0.02,4700,tcp,REQ,1,1,2050,58,254,0,attack
+0.01,5100,udp,INT,1,1,2150,68,254,0,attack
+
+This sample has:
+
+- 6 normal rows
+- 6 attack rows
+- categorical columns: proto, state
+- numerical columns: dur, rate, spkts, dpkts, sbytes, dbytes, sttl, dttl
+- target column: label
+
+
+6. WHAT NORMAL DATA CAN LOOK LIKE
+---------------------------------
+
+Normal traffic usually has values that look moderate and consistent.
+
+Example normal row:
+
+dur,rate,proto,state,spkts,dpkts,sbytes,dbytes,sttl,dttl,label
+0.10,12,tcp,CON,12,9,500,420,64,64,normal
+
+Meaning:
+
+dur
+    The connection duration. 0.10 means short but not extreme.
+
+rate
+    Packets per second. 12 is a moderate value.
+
+proto
+    Protocol. tcp or udp are common.
+
+state
+    Connection state. CON or FIN can appear in normal traffic.
+
+spkts and dpkts
+    Source and destination packet counts.
+
+sbytes and dbytes
+    Source and destination byte counts.
+
+sttl and dttl
+    Time-to-live values. Normal traffic often uses reasonable TTL values such
+    as 64.
+
+label
+    normal
+
+
+7. WHAT ANOMALY DATA CAN LOOK LIKE
+----------------------------------
+
+Anomaly or attack-like traffic often has unusual/extreme values.
+
+Example anomaly row:
+
+dur,rate,proto,state,spkts,dpkts,sbytes,dbytes,sttl,dttl,label
+0.01,5000,tcp,REQ,1,1,2000,60,254,0,attack
+
+Why this can look suspicious:
+
+rate = 5000
+    Very high packet rate.
+
+state = REQ
+    A request state that may indicate incomplete or suspicious communication.
+
+sttl = 254
+    High source TTL can appear in some attack patterns.
+
+dttl = 0
+    Destination TTL of 0 can look abnormal depending on the dataset.
+
+sbytes much larger than dbytes
+    One-sided traffic can sometimes indicate suspicious behavior.
+
+label = attack
+    This tells the training workflow that this row is an anomaly/attack.
+
+
+8. WHAT HAPPENS IF YOU PUT AN ANOMALY IN THE DATASET
+----------------------------------------------------
+
+If your CSV contains anomaly rows, AlgoGuard uses them during training and
+testing.
+
+Example:
+
+normal rows teach the model what normal traffic looks like.
+attack rows teach the model what suspicious traffic looks like.
+
+After upload, AlgoGuard:
+
+1. Reads the CSV.
+2. Treats the last column as the label.
+3. Counts normal and anomaly rows.
+4. Encodes text columns like proto and state.
+5. Scales numerical values.
+6. Splits the data into training and testing sets.
+7. Trains Random Forest, Gradient Boosting, and Voting Classifier.
+8. Tests each model.
+9. Shows the metrics.
+10. Chooses the best-performing model.
+
+If the model predicts anomaly correctly:
+    Recall and F1-score may improve.
+
+If the model predicts normal traffic as anomaly:
+    False Positive Rate increases.
+
+If the model misses actual anomalies:
+    Recall may decrease.
+
+
+9. WHAT HAPPENS IF ALL DATA IS NORMAL
+-------------------------------------
+
+The app will reject the dataset if the target label has only one class.
+
+Example bad dataset:
+
+dur,rate,proto,state,label
+0.10,12,tcp,CON,normal
+0.20,10,udp,CON,normal
+0.15,11,tcp,FIN,normal
+
+Why it is rejected:
+The model needs at least two classes to learn classification.
+
+Good dataset:
+Must have at least:
+
+- one normal class
+- one attack/anomaly class
+
+Also, each class should have enough rows for train/test split.
+
+
+10. WHAT HAPPENS IF ALL DATA IS ATTACK
+--------------------------------------
+
+This is also invalid for training.
+
+The model cannot learn the difference between normal and attack if it only sees
+attack rows.
+
+The dataset should contain both normal and attack/anomaly examples.
+
+
+11. WHAT LABEL NAMES CAN YOU USE
+--------------------------------
+
+Recommended labels:
+
+normal
+attack
+
+Also acceptable:
+
+0
+1
+
+benign
+malicious
+
+Best for this project:
+
+normal
+attack
+
+Reason:
+The dashboard can more clearly count normal and anomaly rows when the normal
+label is named "normal".
+
+
+12. IMPORTANT CSV RULES
+-----------------------
+
+Rule 1:
+The file must end with .csv.
+
+Rule 2:
+The file must have at least two columns:
+
+- one or more feature columns
+- one target label column
+
+Rule 3:
+The target label must be the last column.
+
+Rule 4:
+The target column must not be empty.
+
+Rule 5:
+The target column must contain at least two classes.
+
+Rule 6:
+Each class should have enough rows for training/testing.
+
+Rule 7:
+Text columns are allowed.
+
+Example:
+proto,state
+
+Rule 8:
+Numerical columns are allowed.
+
+Example:
+dur,rate,sbytes,dbytes
+
+
+13. GOOD CSV EXAMPLE
+--------------------
+
+dur,rate,proto,state,label
+0.10,12,tcp,CON,normal
+0.20,10,udp,CON,normal
+0.15,11,tcp,FIN,normal
+0.12,14,udp,CON,normal
+0.01,5000,tcp,REQ,attack
+0.02,4500,tcp,INT,attack
+0.01,4800,udp,REQ,attack
+0.03,5200,tcp,INT,attack
+
+
+14. BAD CSV EXAMPLES
+--------------------
+
+Bad example 1: no target label
+
+dur,rate,proto,state
+0.10,12,tcp,CON
+0.01,5000,tcp,REQ
+
+Problem:
+The app assumes the last column is the label, so it would treat "state" as the
+target by mistake.
+
+Bad example 2: only one class
+
+dur,rate,proto,state,label
+0.10,12,tcp,CON,normal
+0.20,10,udp,CON,normal
+
+Problem:
+Only normal exists. The model needs normal and attack/anomaly.
+
+Bad example 3: empty labels
+
+dur,rate,proto,state,label
+0.10,12,tcp,CON,
+0.01,5000,tcp,REQ,attack
+
+Problem:
+The target label column has missing values.
+
+Bad example 4: too few rows
+
+dur,rate,proto,state,label
+0.10,12,tcp,CON,normal
+0.01,5000,tcp,REQ,attack
+
+Problem:
+Too few rows for a reliable train/test split.
+
+
+15. SIMULATION PAGE: WHAT TO TYPE
+---------------------------------
+
+Go to:
+
+http://localhost:5000/simulation
+
+The page asks for:
+
+Duration
+Rate
+Source Packets
+Destination Packets
+Source Bytes
+Destination Bytes
+Source TTL
+Destination TTL
+Protocol
+State
+
+
+16. SIMULATION NORMAL TEST
+--------------------------
+
+Try these values:
+
+Duration:
+0.001
+
+Rate:
+15
+
+Source Packets:
+12
+
+Destination Packets:
+8
+
+Source Bytes:
+1500
+
+Destination Bytes:
+800
+
+Source TTL:
+64
+
+Destination TTL:
+64
+
+Protocol:
+tcp
+
+State:
+CON
+
+Expected idea:
+This is intended to look more normal because the values are moderate.
+
+Important:
+The model may still classify it differently depending on how the pretrained
+model learned from the dataset. Machine learning predictions are not manually
+hardcoded.
+
+
+17. SIMULATION ANOMALY TEST
+---------------------------
+
+Try these values:
+
+Duration:
+0.000001
+
+Rate:
+5000
+
+Source Packets:
+1
+
+Destination Packets:
+1
+
+Source Bytes:
+2000
+
+Destination Bytes:
+60
+
+Source TTL:
+254
+
+Destination TTL:
+0
+
+Protocol:
+tcp
+
+State:
+REQ
+
+Expected idea:
+This is intended to look more suspicious because the rate is very high, TTL
+values are unusual, and state is REQ.
+
+
+18. WHAT HAPPENS IF SIMULATION DETECTS AN ATTACK
+------------------------------------------------
+
+If the Simulation page predicts Attack:
+
+1. The result card shows Attack.
+2. The confidence percentage is displayed.
+3. The entered flow values are shown.
+
+Current limitation:
+The app does not yet send a real notification to an admin.
+
+Future improvement:
+Add an Alert History page or save every simulation result to a database.
+
+
+19. WHAT HAPPENS IF SIMULATION DETECTS NORMAL
+---------------------------------------------
+
+If the Simulation page predicts Normal:
+
+1. The result card shows Normal.
+2. The confidence percentage is displayed.
+3. The entered flow values are shown.
+
+This means the pretrained model thinks the flow is closer to normal traffic
+than attack traffic.
+
+
+20. WHAT CONFIDENCE MEANS
+-------------------------
+
+Confidence is the model's estimated certainty.
+
+Example:
+
+Prediction:
+Attack
+
+Confidence:
+82.50%
+
+Meaning:
+The model is 82.50% confident in the predicted class.
+
+Important:
+High confidence does not guarantee the prediction is correct. It only shows
+how confident the model is based on what it learned.
+
+
+21. WHAT THE RESULTS TABLE MEANS
+--------------------------------
+
+After uploading a dataset, the Results page shows each model.
+
+Example columns:
+
+Model
+Accuracy
+Precision
+Recall
+F1-score
+False Positive Rate
+Processing Time
+Predicted Normal
+Predicted Anomaly
+Saved Model
+
+Use F1-score as a good overall metric when normal/anomaly classes are not
+perfectly balanced.
+
+Use False Positive Rate to understand how often normal traffic is wrongly
+flagged as suspicious.
+
+
+22. BEST MODEL SELECTION
+------------------------
+
+AlgoGuard chooses the best model using:
+
+1. Higher F1-score
+2. Higher accuracy
+3. Lower false positive rate
+4. Lower processing time
+
+The best model is shown on the Dashboard and Results page.
+
+
+23. WHAT FILES ARE CREATED AFTER TRAINING
+-----------------------------------------
+
+After uploading and training, the app can generate:
+
+saved_models/random_forest.joblib
+saved_models/gradient_boosting.joblib
+saved_models/voting_classifier.joblib
+reports/model_report_YYYYMMDDHHMMSS.csv
+
+These generated files are ignored by Git so the repository stays clean.
+
+
+24. HOW TO EXPLAIN THIS IN A PRESENTATION
+-----------------------------------------
+
+Short explanation:
+
+AlgoGuard is a lightweight anomaly detection prototype for network traffic.
+It allows users to upload a CSV dataset, automatically preprocesses the data,
+trains three ensemble machine learning models, compares their performance, and
+identifies the best model. It also includes a manual Simulation page where a
+single network flow can be classified as Normal or Attack using pretrained
+model artifacts.
+
+If asked if it monitors real traffic:
+
+No. The current version is a simulation prototype. It does not capture live
+network packets yet. It demonstrates the machine learning pipeline using CSV
+datasets and manual flow input.
+
+If asked what happens when an anomaly is detected:
+
+The app displays the anomaly/attack result and confidence score. In the dataset
+workflow, anomaly counts and model performance are shown in the dashboard and
+results table. Real admin notifications and alert history are planned future
+enhancements.
+
+
+25. FUTURE IMPROVEMENTS
+-----------------------
+
+Possible future features:
+
+1. Store every prediction in a database.
+2. Add Alert History page.
+3. Add admin notification for anomalies.
+4. Add downloadable PDF reports.
+5. Add live packet capture using tools such as Scapy or PyShark.
+6. Add retraining from reviewed prediction records.
+7. Add charts for normal vs anomaly counts.
+
+
+26. QUICK CHECKLIST BEFORE DEMO
+-------------------------------
+
+Before presenting:
+
+1. Open terminal in the project root.
+2. Activate venv.
+3. Install requirements.
+4. Run python app.py.
+5. Open http://localhost:5000.
+6. Try the Dashboard.
+7. Upload a test CSV.
+8. Check Results.
+9. Try Simulation normal input.
+10. Try Simulation anomaly input.
+
+
+27. SIMPLEST TEST CSV
+---------------------
+
+If you need a very quick CSV for testing, use this:
+
+dur,rate,proto,state,label
+0.10,12,tcp,CON,normal
+0.20,10,udp,CON,normal
+0.15,11,tcp,FIN,normal
+0.12,14,udp,CON,normal
+0.01,5000,tcp,REQ,attack
+0.02,4500,tcp,INT,attack
+0.01,4800,udp,REQ,attack
+0.03,5200,tcp,INT,attack
+
+Save it as:
+
+quick_test.csv
+
+Then upload it on the Upload page.
+
+
+28. HOW TO CREATE A CSV FILE
+----------------------------
+
+The easiest way to create a CSV file on Windows is with Notepad.
+
+Step 1:
+Open Notepad.
+
+Step 2:
+Paste this sample data:
+
+dur,rate,proto,state,label
+0.10,12,tcp,CON,normal
+0.20,10,udp,CON,normal
+0.15,11,tcp,FIN,normal
+0.12,14,udp,CON,normal
+0.01,5000,tcp,REQ,attack
+0.02,4500,tcp,INT,attack
+0.01,4800,udp,REQ,attack
+0.03,5200,tcp,INT,attack
+
+Step 3:
+Click File > Save As.
+
+Step 4:
+Set "Save as type" to:
+
+All Files
+
+Step 5:
+Name the file:
+
+quick_test.csv
+
+Step 6:
+Save it somewhere easy to find, such as the Desktop.
+
+Step 7:
+Open AlgoGuard, go to the Upload page, and upload quick_test.csv.
+
+Important:
+Make sure the file is named:
+
+quick_test.csv
+
+Not:
+
+quick_test.csv.txt
+
+If Windows hides file extensions, Notepad may accidentally save it as
+quick_test.csv.txt. Choosing "All Files" helps prevent that.
+
+
+29. WHAT THE CSV COLUMNS MEAN
+-----------------------------
+
+This sample CSV has five columns:
+
+dur
+    Short for duration.
+    It represents how long the network flow lasted.
+
+    Example:
+    0.10
+
+    A small value means the flow happened quickly.
+
+rate
+    Represents traffic rate, such as packets per second.
+
+    Example:
+    12
+
+    A moderate value can look normal.
+    A very high value, such as 5000, can look suspicious.
+
+proto
+    Short for protocol.
+    It tells what network protocol was used.
+
+    Example values:
+    tcp
+    udp
+    icmp
+
+state
+    Represents the connection state.
+
+    Example values:
+    CON
+    FIN
+    REQ
+    INT
+
+    CON or FIN can look more normal.
+    REQ or INT can sometimes appear in suspicious traffic depending on the
+    dataset.
+
+label
+    This is the target label.
+    It tells the model the correct answer for that row.
+
+    Example values:
+    normal
+    attack
+
+    Important:
+    In AlgoGuard, the label column must be the last column.
+
+
+30. WHAT EACH SAMPLE ROW MEANS
+------------------------------
+
+Header row:
+
+dur,rate,proto,state,label
+
+This row names the columns. It is not a traffic record.
+
+Normal row example:
+
+0.10,12,tcp,CON,normal
+
+Meaning:
+
+dur = 0.10
+    The traffic flow lasted 0.10 seconds.
+
+rate = 12
+    The traffic rate is moderate.
+
+proto = tcp
+    The flow used TCP.
+
+state = CON
+    The connection state is CON.
+
+label = normal
+    This row is marked as normal traffic.
+
+Attack row example:
+
+0.01,5000,tcp,REQ,attack
+
+Meaning:
+
+dur = 0.01
+    The traffic flow was very short.
+
+rate = 5000
+    The traffic rate is very high.
+
+proto = tcp
+    The flow used TCP.
+
+state = REQ
+    The connection state is REQ.
+
+label = attack
+    This row is marked as suspicious/attack traffic.
+
+
+31. HOW TO READ THE SAMPLE CSV
+------------------------------
+
+This row:
+
+0.20,10,udp,CON,normal
+
+Can be read as:
+
+"A UDP network flow lasted 0.20 seconds, had a traffic rate of 10, had a CON
+state, and is labeled as normal."
+
+This row:
+
+0.03,5200,tcp,INT,attack
+
+Can be read as:
+
+"A TCP network flow lasted 0.03 seconds, had a very high traffic rate of 5200,
+had an INT state, and is labeled as attack."
+
+
+32. WHY THE CSV NEEDS NORMAL AND ATTACK ROWS
+--------------------------------------------
+
+The model learns by comparing examples.
+
+Normal rows teach the model:
+
+"This is what safe traffic can look like."
+
+Attack rows teach the model:
+
+"This is what suspicious traffic can look like."
+
+If the dataset only has normal rows, the model cannot learn what attack traffic
+looks like.
+
+If the dataset only has attack rows, the model cannot learn what normal traffic
+looks like.
+
+That is why a good training CSV needs both normal and attack rows.
+
+
+33. FINAL REMINDER
+------------------
+
+AlgoGuard is not trying to be a complete enterprise IDS yet.
+
+It is a capstone/research prototype that demonstrates:
+
+- data upload
+- preprocessing
+- feature encoding
+- feature scaling
+- model training
+- model comparison
+- anomaly detection
+- simulation prediction
+- dashboard/report display
