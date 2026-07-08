@@ -2,7 +2,7 @@
 # Jupyter checkpoints
 .ipynb_checkpoints/
 
-# LARGE DATA FILES 
+# LARGE DATA FILES
 dataset/processed/X_train.npy
 dataset/processed/X_test.npy
 dataset/processed/y_train.npy
