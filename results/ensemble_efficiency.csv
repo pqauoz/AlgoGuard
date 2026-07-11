@@ -1,0 +1,7 @@
+Model,CPU Usage (%),RAM Usage (MB),Training Time (s),Prediction Time (s),Model Size (MB)
+Stack All 5 → LR,1.1,331.08,87.5814,1.6752,234.4137
+Stack All 5 → GB,15.5,154.41,92.2199,1.2324,234.6821
+Stack RF+AB+GB → LR,1.4,23.97,82.044,0.4938,210.7568
+Stack RF+AB+GB → GB,10.3,241.18,89.3355,0.3719,211.0208
+Soft Voting (All 5),4.0,118.76,44.1937,1.2861,234.4129
+Hard Voting (All 5),2.7,76.95,26.455,1.4153,234.4129
