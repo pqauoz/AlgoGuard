@@ -44,9 +44,10 @@ ENV/
 .DS_Store
 Thumbs.db
 
-# Legacy compressed model copy
-legacy_simulation/Stacking_Top3_GB.pkl
+# Ignore all large model files
 models/*.pkl
+app/*.pkl
+
 
 
 # Keep smaller files
