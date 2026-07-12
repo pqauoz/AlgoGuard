@@ -17,7 +17,7 @@ The current version is a simulation/prototype. It analyzes uploaded datasets or 
 - Numerical feature scaling
 - Train/test split
 - Ensemble model training and comparison
-- Manual single-flow simulation demo using pretrained model artifacts
+- Manual single-flow simulation demo using the winning pretrained model
 - Performance metrics table
 - Normal traffic and anomaly counts
 - Best model identification
@@ -35,7 +35,7 @@ The main dataset workflow trains and compares:
 - Gradient Boosting
 - Voting Classifier
 
-The simulation demo uses the pretrained model artifacts in `legacy_simulation/`.
+The simulation demo uses the winning pretrained `Stacking_Top3_LR` artifact from `artifacts/pretrained/Stacking_Top3_LR.zip`.
 
 ---
 
@@ -65,7 +65,13 @@ AlgoGuard/
 |   |-- preprocessing_service.py
 |   |-- training_service.py
 |   |-- evaluation_service.py
-|   `-- simulation_service.py
+|   |-- simulation_service.py
+|   `-- simulation/
+|       |-- feature_extractor.py
+|       |-- flow_builder.py
+|       |-- model_loader.py
+|       |-- predictor.py
+|       `-- preprocessor.py
 |-- templates/
 |   |-- admins.html
 |   |-- base.html
@@ -76,24 +82,21 @@ AlgoGuard/
 |   `-- simulation.html
 |-- static/
 |   |-- css/
-|   |   `-- style.css
-|   `-- js/
+|   `-- style.css
 |-- uploads/
 |-- saved_models/
 |-- reports/
 |-- database/
-|-- legacy_simulation/
-|   |-- app.py
-|   |-- feature_extractor.py
-|   |-- flow_builder.py
-|   |-- model_loader.py
-|   |-- predictor.py
-|   |-- preprocessor.py
-|   `-- templates/
-|-- dataset/
-|-- models/
-|-- notebooks/
-`-- results/
+|-- artifacts/
+|   `-- pretrained/
+|       |-- Stacking_Top3_LR.zip
+|       |-- scaler.pkl
+|       `-- encoded_columns.npy
+`-- research/
+    |-- dataset/
+    |-- models/
+    |-- notebooks/
+    `-- results/
 ```
 
 ---
@@ -103,13 +106,13 @@ AlgoGuard/
 - `app.py`: main Flask application entrypoint.
 - `services/`: database, preprocessing, training, evaluation, and simulation logic.
 - `templates/`: pages used by the main Flask app.
-- `static/`: CSS and JavaScript assets.
+- `static/`: CSS assets for the web UI.
+- `artifacts/pretrained/`: winning model and preprocessing resources used by Simulation Mode.
 - `uploads/`: temporary uploaded CSV files.
 - `saved_models/`: Joblib models created by the training workflow.
 - `reports/`: CSV reports created after model comparison.
 - `database/`: local SQLite database file created when the app runs.
-- `legacy_simulation/`: older pretrained manual prediction demo files used by the Simulation page.
-- `dataset/`, `models/`, `notebooks/`, `results/`: research and experiment artifacts.
+- `research/`: optional notebooks, datasets, trained research models, and experiment result tables.
 
 ---
 
@@ -216,7 +219,7 @@ The new accounts are stored in SQLite with hashed passwords.
 
 ### Simulation Demo
 
-Open the Simulation page to manually enter one network traffic flow and test it against the pretrained model artifacts in `legacy_simulation/`.
+Open the Simulation page to manually enter one network traffic flow and test it against the winning pretrained `Stacking_Top3_LR` model.
 Each simulation stores a traffic record and prediction in SQLite. If the result
 is Attack, AlgoGuard also creates an alert record.
 
@@ -279,11 +282,11 @@ The uploaded file must:
 
 ### Model File Not Found
 
-The Simulation page uses legacy pretrained artifacts. Confirm these files exist in `legacy_simulation/`:
+The Simulation page uses the winning pretrained model artifact plus matching preprocessing resources. Confirm these files exist:
 
-- `Stacking_Top3_GB.pkl` or `Stacking_Top3_GB.zip`
-- `scaler.pkl`
-- `encoded_columns.npy`
+- `artifacts/pretrained/Stacking_Top3_LR.zip`
+- `artifacts/pretrained/scaler.pkl`
+- `artifacts/pretrained/encoded_columns.npy`
 
 ### Forgot Local Admin Password
 

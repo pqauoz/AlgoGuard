@@ -3,10 +3,10 @@
 .ipynb_checkpoints/
 
 # LARGE DATA FILES
-dataset/processed/X_train.npy
-dataset/processed/X_test.npy
-dataset/processed/y_train.npy
-dataset/processed/y_test.npy
+research/dataset/processed/X_train.npy
+research/dataset/processed/X_test.npy
+research/dataset/processed/y_train.npy
+research/dataset/processed/y_test.npy
 
 # Backup files
 *.bak
@@ -48,11 +48,11 @@ ENV/
 Thumbs.db
 
 # Ignore all large model files
-models/*.pkl
-app/*.pkl
+research/models/*.pkl
+artifacts/pretrained/Stacking_*.pkl
 
 
 
 # Keep smaller files
-!dataset/processed/scaler.pkl
-!dataset/processed/encoded_columns.npy
+!research/dataset/processed/scaler.pkl
+!research/dataset/processed/encoded_columns.npy

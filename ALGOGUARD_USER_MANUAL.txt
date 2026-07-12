@@ -662,7 +662,7 @@ It allows users to upload a CSV dataset, automatically preprocesses the data,
 trains three ensemble machine learning models, compares their performance, and
 identifies the best model. It also includes a manual Simulation page where a
 single network flow can be classified as Normal or Attack using pretrained
-model artifacts.
+model artifacts from artifacts/pretrained.
 
 If asked if it monitors real traffic:
 

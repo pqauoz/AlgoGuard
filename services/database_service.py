@@ -8,6 +8,7 @@ from werkzeug.security import generate_password_hash
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 DATABASE_FOLDER = os.path.join(BASE_DIR, "database")
 DATABASE_PATH = os.path.join(DATABASE_FOLDER, "algoguard.sqlite3")
+SIMULATION_MODEL_NAME = os.environ.get("ALGOGUARD_SIMULATION_MODEL", "Stacking_Top3_LR")
 
 
 def utc_now():
@@ -259,10 +260,10 @@ def insert_detection_model(model_result, version="dataset-workflow"):
         return cursor.lastrowid
 
 
-def get_or_create_legacy_model():
+def get_or_create_simulation_model():
     """Return the database id for the pretrained simulation model."""
-    model_name = "Stacking_Top3_GB"
-    version = "legacy-simulation"
+    model_name = SIMULATION_MODEL_NAME
+    version = "pretrained-simulation"
 
     with get_connection() as connection:
         row = connection.execute(

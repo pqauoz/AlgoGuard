@@ -5,6 +5,13 @@ import numpy as np
 import pandas as pd
 
 
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+DEFAULT_ARTIFACT_DIR = os.path.join(BASE_DIR, "artifacts", "pretrained")
+ARTIFACT_DIR = os.path.abspath(
+    os.environ.get("ALGOGUARD_PRETRAINED_ARTIFACT_DIR", DEFAULT_ARTIFACT_DIR)
+)
+
+
 class Preprocessor:
     def __init__(self):
         self.scaler = None
@@ -12,11 +19,9 @@ class Preprocessor:
         self.load_resources()
 
     def load_resources(self):
-        """Load the scaler and encoded feature column names from the app folder."""
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-
-        scaler_path = os.path.join(base_dir, "scaler.pkl")
-        columns_path = os.path.join(base_dir, "encoded_columns.npy")
+        """Load the scaler and encoded feature column names."""
+        scaler_path = os.path.join(ARTIFACT_DIR, "scaler.pkl")
+        columns_path = os.path.join(ARTIFACT_DIR, "encoded_columns.npy")
 
         self.scaler = joblib.load(scaler_path)
         if hasattr(self.scaler, "feature_names_in_"):

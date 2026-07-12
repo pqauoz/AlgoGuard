@@ -11,7 +11,7 @@ from services.database_service import (
     DATABASE_FOLDER,
     create_admin,
     get_admin_by_username,
-    get_or_create_legacy_model,
+    get_or_create_simulation_model,
     initialize_database,
     insert_alert,
     insert_detection_model,
@@ -108,7 +108,7 @@ def persist_training_records(results):
 def persist_simulation_record(result):
     """Save a manual simulation prediction and create an alert for attacks."""
     traffic_id = insert_network_traffic_from_flow(result["flow_data"], "simulation")
-    model_id = get_or_create_legacy_model()
+    model_id = get_or_create_simulation_model()
     prediction_id = insert_prediction(
         traffic_id,
         model_id,
@@ -352,7 +352,7 @@ def results():
 
 @app.route("/simulation", methods=["GET", "POST"])
 def simulation_demo():
-    """Run a manual traffic-flow simulation using the pretrained legacy model."""
+    """Run a manual traffic-flow simulation using the pretrained winning model."""
     form_data = default_simulation_form()
     result = None
 
