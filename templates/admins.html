@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Accounts | AlgoGuard{% endblock %}
+
+{% block content %}
+<section class="dashboard-header compact">
+    <div>
+        <p class="eyebrow">Access Control</p>
+        <h1>Admin Accounts</h1>
+        <p class="header-copy">Create and review administrator accounts for the AlgoGuard console.</p>
+    </div>
+</section>
+
+<section class="admin-layout">
+    <form class="panel admin-form" method="post" autocomplete="off">
+        <div class="panel-heading">
+            <div>
+                <p class="eyebrow">New Account</p>
+                <h2>Create Admin</h2>
+            </div>
+            <span class="status-pill active">Hashed</span>
+        </div>
+
+        <div>
+            <label class="form-label" for="username">Username</label>
+            <input class="form-control" id="username" name="username" type="text" value="{{ form_data.username }}" minlength="3" required>
+        </div>
+
+        <div>
+            <label class="form-label" for="email">Email</label>
+            <input class="form-control" id="email" name="email" type="email" value="{{ form_data.email }}">
+        </div>
+
+        <div>
+            <label class="form-label" for="role">Role</label>
+            <select class="form-select" id="role" name="role">
+                {% for role in role_options %}
+                    <option value="{{ role }}" {% if form_data.role == role %}selected{% endif %}>{{ role }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div>
+            <label class="form-label" for="password">Password</label>
+            <input class="form-control" id="password" name="password" type="password" minlength="6" required>
+        </div>
+
+        <div>
+            <label class="form-label" for="confirm_password">Confirm Password</label>
+            <input class="form-control" id="confirm_password" name="confirm_password" type="password" minlength="6" required>
+        </div>
+
+        <button class="btn btn-accent w-100" type="submit">
+            <i class="bi bi-person-plus"></i>
+            Create Account
+        </button>
+    </form>
+
+    <div class="panel">
+        <div class="panel-heading">
+            <div>
+                <p class="eyebrow">Directory</p>
+                <h2>Registered Admins</h2>
+            </div>
+            <span class="status-pill active">{{ admins|length }} total</span>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-dark table-hover align-middle admin-table mb-0">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Username</th>
+                        <th>Email</th>
+                        <th>Role</th>
+                        <th>Created</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for admin in admins %}
+                    <tr>
+                        <td>{{ admin.admin_id }}</td>
+                        <td><strong>{{ admin.username }}</strong></td>
+                        <td>{{ admin.email or "Not set" }}</td>
+                        <td><span class="status-pill {% if admin.role == 'Administrator' %}active{% endif %}">{{ admin.role }}</span></td>
+                        <td>{{ admin.created_at }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</section>
+{% endblock %}

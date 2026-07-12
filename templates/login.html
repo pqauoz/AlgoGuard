@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}Login | AlgoGuard{% endblock %}
+{% block body_class %}login-body{% endblock %}
+
+{% block content %}
+<section class="login-page">
+    <div class="login-identity">
+        <span class="brand-mark login-brand-mark"><i class="bi bi-shield-lock"></i></span>
+        <div>
+            <p class="eyebrow">Administrator Access</p>
+            <h1>AlgoGuard</h1>
+            <p class="header-copy">Secure entry for the anomaly detection dashboard, dataset training workflow, simulation console, and audit records.</p>
+        </div>
+        <div class="login-signal-grid">
+            <span>Dataset Training</span>
+            <span>Simulation</span>
+            <span>SQLite Logs</span>
+        </div>
+    </div>
+
+    <form class="login-panel" method="post" autocomplete="off">
+        <input type="hidden" name="next" value="{{ next_url }}">
+        <div class="panel-heading">
+            <div>
+                <p class="eyebrow">Login</p>
+                <h2>Admin Console</h2>
+            </div>
+            <span class="status-pill active">Protected</span>
+        </div>
+
+        <div>
+            <label class="form-label" for="username">Username</label>
+            <input class="form-control" id="username" name="username" type="text" value="{{ username or '' }}" required autofocus>
+        </div>
+
+        <div>
+            <label class="form-label" for="password">Password</label>
+            <input class="form-control" id="password" name="password" type="password" required>
+        </div>
+
+        <button class="btn btn-accent w-100" type="submit">
+            <i class="bi bi-box-arrow-in-right"></i>
+            Sign In
+        </button>
+
+        <div class="login-note">
+            <strong>Default local account</strong>
+            <span>admin / admin123</span>
+        </div>
+    </form>
+</section>
+{% endblock %}

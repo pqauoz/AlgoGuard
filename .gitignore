@@ -22,6 +22,9 @@ saved_models/*
 reports/*
 !reports/.gitignore
 !reports/.gitkeep
+database/*
+!database/.gitignore
+!database/.gitkeep
 
 # Python cache
 __pycache__/

@@ -39,9 +39,28 @@ venv\Scripts\activate
 python -m pip install -r requirements.txt
 python app.py
 
+if python is not on path, run with the existing virtual environment
+.\venv\Scripts\python.exe app.py
+
 Then open:
 
 http://localhost:5000
+
+Default local login:
+
+Username:
+admin
+
+Password:
+admin123
+
+Important:
+The default admin is created only when the local SQLite database is first
+created. For a real deployment, change the admin username/password using
+environment variables before the first run.
+
+After logging in with an Administrator account, open the Admins page to create
+more admin accounts. Each new admin is stored in SQLite with a hashed password.
 
 If port 5000 is busy:
 
@@ -55,6 +74,14 @@ http://localhost:5001
 
 3. WEBSITE PAGES
 ----------------
+
+Login
+    Opens the protected admin entry page. You must sign in before using the
+    Dashboard, Upload, Results, or Simulation pages.
+
+Admins
+    Allows an Administrator account to create and review multiple admin
+    accounts.
 
 Dashboard
     Shows the AlgoGuard overview, latest dataset result, normal/anomaly
@@ -220,7 +247,8 @@ After upload, AlgoGuard:
 7. Trains Random Forest, Gradient Boosting, and Voting Classifier.
 8. Tests each model.
 9. Shows the metrics.
-10. Chooses the best-performing model.
+10. Saves model records and report metadata in SQLite.
+11. Chooses the best-performing model.
 
 If the model predicts anomaly correctly:
     Recall and F1-score may improve.
@@ -498,12 +526,13 @@ If the Simulation page predicts Attack:
 1. The result card shows Attack.
 2. The confidence percentage is displayed.
 3. The entered flow values are shown.
-
-Current limitation:
-The app does not yet send a real notification to an admin.
+4. The traffic flow is saved in the network_traffic table.
+5. The model result is saved in the prediction table.
+6. An alert record is created in the alert table.
 
 Future improvement:
-Add an Alert History page or save every simulation result to a database.
+Add an Alert History page so admins can review saved alert records directly
+inside the web interface.
 
 
 19. WHAT HAPPENS IF SIMULATION DETECTS NORMAL
@@ -514,6 +543,7 @@ If the Simulation page predicts Normal:
 1. The result card shows Normal.
 2. The confidence percentage is displayed.
 3. The entered flow values are shown.
+4. The traffic flow and prediction are saved in SQLite.
 
 This means the pretrained model thinks the flow is closer to normal traffic
 than attack traffic.
@@ -547,7 +577,7 @@ After uploading a dataset, the Results page shows each model.
 
 Example columns:
 
-Model
+Model Size
 Accuracy
 Precision
 Recall
@@ -557,6 +587,9 @@ Processing Time
 Predicted Normal
 Predicted Anomaly
 Saved Model
+RAM Usage
+Roc-auc  
+CPu usage
 
 Use F1-score as a good overall metric when normal/anomaly classes are not
 perfectly balanced.
@@ -587,8 +620,36 @@ saved_models/random_forest.joblib
 saved_models/gradient_boosting.joblib
 saved_models/voting_classifier.joblib
 reports/model_report_YYYYMMDDHHMMSS.csv
+database/algoguard.sqlite3
 
 These generated files are ignored by Git so the repository stays clean.
+
+The SQLite database stores:
+
+admin
+    Multiple admin login accounts with hashed passwords.
+
+network_traffic
+    Traffic rows created from manual simulation or future dataset capture.
+
+detection_model
+    Trained model names, versions, metrics, training time, and model size.
+
+prediction
+    Prediction result, confidence score, timestamp, traffic reference, and
+    model reference.
+
+alert
+    Attack/anomaly alerts created from suspicious predictions.
+
+report
+    Report metadata connected to the admin who generated the report.
+
+report_alert
+    Join table that can connect reports to one or more alert records.
+
+system_log
+    Login, logout, upload, training, and simulation activity records.
 
 
 24. HOW TO EXPLAIN THIS IN A PRESENTATION
@@ -611,10 +672,11 @@ datasets and manual flow input.
 
 If asked what happens when an anomaly is detected:
 
-The app displays the anomaly/attack result and confidence score. In the dataset
-workflow, anomaly counts and model performance are shown in the dashboard and
-results table. Real admin notifications and alert history are planned future
-enhancements.
+The app displays the anomaly/attack result and confidence score. In Simulation
+Mode, the traffic record, prediction record, and alert record are saved in
+SQLite. In Dataset Mode, anomaly counts and model performance are shown in the
+dashboard and results table. Real-time notifications and a full Alert History
+page are planned future enhancements.
 
 
 25. FUTURE IMPROVEMENTS
@@ -622,13 +684,12 @@ enhancements.
 
 Possible future features:
 
-1. Store every prediction in a database.
-2. Add Alert History page.
-3. Add admin notification for anomalies.
-4. Add downloadable PDF reports.
-5. Add live packet capture using tools such as Scapy or PyShark.
-6. Add retraining from reviewed prediction records.
-7. Add charts for normal vs anomaly counts.
+1. Add Alert History page.
+2. Add admin notification for anomalies.
+3. Add downloadable PDF reports.
+4. Add live packet capture using tools such as Scapy or PyShark.
+5. Add retraining from reviewed prediction records.
+6. Add charts for normal vs anomaly counts.
 
 
 26. QUICK CHECKLIST BEFORE DEMO
