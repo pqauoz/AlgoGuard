@@ -577,19 +577,16 @@ After uploading a dataset, the Results page shows each model.
 
 Example columns:
 
-Model Size
+Model
 Accuracy
 Precision
 Recall
 F1-score
+ROC-AUC
 False Positive Rate
-Processing Time
-Predicted Normal
-Predicted Anomaly
-Saved Model
+CPU Usage
 RAM Usage
-Roc-auc  
-CPu usage
+Model Size
 
 Use F1-score as a good overall metric when normal/anomaly classes are not
 perfectly balanced.

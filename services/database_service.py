@@ -9,6 +9,12 @@ BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 DATABASE_FOLDER = os.path.join(BASE_DIR, "database")
 DATABASE_PATH = os.path.join(DATABASE_FOLDER, "algoguard.sqlite3")
 SIMULATION_MODEL_NAME = os.environ.get("ALGOGUARD_SIMULATION_MODEL", "Stacking_Top3_LR")
+DETECTION_MODEL_COLUMN_MIGRATIONS = {
+    "roc_auc": "REAL",
+    "cpu_usage": "REAL",
+    "ram_usage": "REAL",
+    "model_size": "REAL",
+}
 
 
 def utc_now():
@@ -123,8 +129,23 @@ def initialize_database():
             );
             """
         )
+        _ensure_detection_model_schema(connection)
 
     seed_default_admin()
+
+
+def _ensure_detection_model_schema(connection):
+    """Add nullable metric columns when opening an older AlgoGuard database."""
+    existing_columns = {
+        row["name"]
+        for row in connection.execute("PRAGMA table_info(detection_model)").fetchall()
+    }
+
+    for column_name, column_type in DETECTION_MODEL_COLUMN_MIGRATIONS.items():
+        if column_name not in existing_columns:
+            connection.execute(
+                f"ALTER TABLE detection_model ADD COLUMN {column_name} {column_type}"
+            )
 
 
 def seed_default_admin():
@@ -225,10 +246,10 @@ def insert_detection_model(model_result, version="dataset-workflow"):
     fpr = _safe_float(model_result.get("false_positive_rate"))
     specificity = round(100 - fpr, 2) if fpr is not None else None
     model_path = model_result.get("model_path")
-    model_size = None
+    model_size = _safe_float(model_result.get("model_size"))
 
-    if model_path and os.path.exists(model_path):
-        model_size = round(os.path.getsize(model_path) / 1024, 2)
+    if model_size is None and model_path and os.path.exists(model_path):
+        model_size = round(os.path.getsize(model_path) / (1024 * 1024), 2)
 
     with get_connection() as connection:
         cursor = connection.execute(
@@ -250,9 +271,9 @@ def insert_detection_model(model_result, version="dataset-workflow"):
                 _safe_float(model_result.get("f1_score")),
                 specificity,
                 fpr,
-                None,
-                None,
-                None,
+                _safe_float(model_result.get("roc_auc")),
+                _safe_float(model_result.get("cpu_usage")),
+                _safe_float(model_result.get("ram_usage")),
                 _safe_float(model_result.get("processing_time")),
                 model_size,
             ),

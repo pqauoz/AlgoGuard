@@ -1,5 +1,6 @@
 import os
 import time
+import tracemalloc
 
 import joblib
 from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier, VotingClassifier
@@ -78,10 +79,19 @@ def train_and_compare_models(prepared_dataset, saved_model_folder):
             ]
         )
 
+        tracemalloc.start()
         start_time = time.perf_counter()
+        start_cpu = time.process_time()
         pipeline.fit(prepared_dataset.X_train, prepared_dataset.y_train)
         predictions = pipeline.predict(prepared_dataset.X_test)
+        prediction_scores = pipeline.predict_proba(prepared_dataset.X_test)
+        cpu_time = time.process_time() - start_cpu
         processing_time = time.perf_counter() - start_time
+        _, peak_memory = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+
+        cpu_usage = (cpu_time / processing_time) * 100 if processing_time else 0
+        ram_usage = peak_memory / (1024 * 1024)
 
         model_path = os.path.join(saved_model_folder, _safe_model_filename(model_name))
         joblib.dump(
@@ -93,10 +103,21 @@ def train_and_compare_models(prepared_dataset, saved_model_folder):
             },
             model_path,
         )
+        model_size = os.path.getsize(model_path) / (1024 * 1024)
 
-        metrics = calculate_metrics(model_name, prepared_dataset.y_test, predictions, processing_time)
+        metrics = calculate_metrics(
+            model_name,
+            prepared_dataset.y_test,
+            predictions,
+            processing_time,
+            prediction_scores=prediction_scores,
+            class_labels=pipeline.classes_,
+            cpu_usage=cpu_usage,
+            ram_usage=ram_usage,
+        )
         metrics["model_path"] = model_path
         metrics["model_file"] = os.path.basename(model_path)
+        metrics["model_size"] = round(model_size, 2)
         model_results.append(metrics)
 
     best_model = identify_best_model(model_results)

@@ -56,11 +56,11 @@
                     <th>Precision</th>
                     <th>Recall</th>
                     <th>F1-score</th>
-                    <th>FPR</th>
-                    <th>Processing Time</th>
-                    <th>Predicted Normal</th>
-                    <th>Predicted Anomaly</th>
-                    <th>Saved Model</th>
+                    <th>ROC-AUC</th>
+                    <th>False Positive Rate</th>
+                    <th>CPU Usage</th>
+                    <th>RAM Usage</th>
+                    <th>Model Size</th>
                 </tr>
             </thead>
             <tbody>
@@ -76,11 +76,11 @@
                     <td>{{ result.precision }}%</td>
                     <td>{{ result.recall }}%</td>
                     <td>{{ result.f1_score }}%</td>
+                    <td>{{ result.roc_auc ~ "%" if result.roc_auc is not none else "N/A" }}</td>
                     <td>{{ result.false_positive_rate }}%</td>
-                    <td>{{ result.processing_time }}s</td>
-                    <td>{{ result.predicted_normal_count }}</td>
-                    <td>{{ result.predicted_anomaly_count }}</td>
-                    <td>{{ result.model_file }}</td>
+                    <td>{{ result.cpu_usage ~ "%" if result.cpu_usage is not none else "N/A" }}</td>
+                    <td>{{ result.ram_usage ~ " MB" if result.ram_usage is not none else "N/A" }}</td>
+                    <td>{{ result.model_size ~ " MB" if result.model_size is not none else "N/A" }}</td>
                 </tr>
                 {% endfor %}
             </tbody>

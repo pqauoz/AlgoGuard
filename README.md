@@ -47,10 +47,11 @@ AlgoGuard displays:
 - Precision
 - Recall
 - F1-score
+- ROC-AUC
 - False Positive Rate
-- Processing Time
-- Predicted normal count
-- Predicted anomaly count
+- CPU Usage
+- RAM Usage
+- Model Size
 
 ---
 

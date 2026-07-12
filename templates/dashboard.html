@@ -64,6 +64,7 @@
                         <th>Precision</th>
                         <th>Recall</th>
                         <th>F1-score</th>
+                        <th>ROC-AUC</th>
                         <th>FPR</th>
                     </tr>
                 </thead>
@@ -75,6 +76,7 @@
                         <td>{{ result.precision }}%</td>
                         <td>{{ result.recall }}%</td>
                         <td>{{ result.f1_score }}%</td>
+                        <td>{{ result.roc_auc ~ "%" if result.roc_auc is not none else "N/A" }}</td>
                         <td>{{ result.false_positive_rate }}%</td>
                     </tr>
                     {% endfor %}
