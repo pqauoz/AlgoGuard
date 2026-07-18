@@ -3,13 +3,7 @@
 {% block title %}Admin Accounts | AlgoGuard{% endblock %}
 
 {% block content %}
-<section class="dashboard-header compact">
-    <div>
-        <p class="eyebrow">Access Control</p>
-        <h1>Admin Accounts</h1>
-        <p class="header-copy">Create and review administrator accounts for the AlgoGuard console.</p>
-    </div>
-</section>
+<header class="page-heading"><div><p class="eyebrow">Access Control</p><h1>Admin Accounts</h1><p class="page-meta">{{ admins|length }} registered account{{ '' if admins|length == 1 else 's' }}</p></div></header>
 
 <section class="admin-layout">
     <form class="panel admin-form" method="post" autocomplete="off">
@@ -18,7 +12,7 @@
                 <p class="eyebrow">New Account</p>
                 <h2>Create Admin</h2>
             </div>
-            <span class="status-pill active">Hashed</span>
+            <span class="status-badge success">Hashed</span>
         </div>
 
         <div>
@@ -62,11 +56,11 @@
                 <p class="eyebrow">Directory</p>
                 <h2>Registered Admins</h2>
             </div>
-            <span class="status-pill active">{{ admins|length }} total</span>
+            <span class="status-badge">{{ admins|length }} total</span>
         </div>
 
         <div class="table-responsive">
-            <table class="table table-dark table-hover align-middle admin-table mb-0">
+            <table class="table data-table align-middle admin-table mb-0">
                 <thead>
                     <tr>
                         <th>ID</th>
@@ -82,7 +76,7 @@
                         <td>{{ admin.admin_id }}</td>
                         <td><strong>{{ admin.username }}</strong></td>
                         <td>{{ admin.email or "Not set" }}</td>
-                        <td><span class="status-pill {% if admin.role == 'Administrator' %}active{% endif %}">{{ admin.role }}</span></td>
+                        <td><span class="status-badge {% if admin.role == 'Administrator' %}success{% endif %}">{{ admin.role }}</span></td>
                         <td>{{ admin.created_at }}</td>
                     </tr>
                     {% endfor %}

@@ -1,3 +1,5 @@
+import math
+
 import numpy as np
 from sklearn.metrics import (
     accuracy_score,
@@ -9,114 +11,161 @@ from sklearn.metrics import (
 )
 
 
-NORMAL_LABELS = {"0", "normal", "benign", "legitimate", "clean"}
+METRIC_DIRECTIONS = {
+    "accuracy": "higher",
+    "precision": "higher",
+    "recall": "higher",
+    "f1_score": "higher",
+    "roc_auc": "higher",
+    "false_positive_rate": "lower",
+    "cpu_usage": "lower",
+    "ram_usage": "lower",
+    "model_size": "lower",
+}
 
-
-def infer_normal_label(labels):
-    """Find the normal label using common network anomaly naming patterns."""
-    label_values = [str(label).strip() for label in labels]
-    for label in label_values:
-        if label.lower() in NORMAL_LABELS:
-            return label
-    return sorted(set(label_values))[0]
+RANKING_METRICS = tuple(METRIC_DIRECTIONS.keys())
 
 
 def false_positive_rate(y_true, y_pred):
-    """Calculate FPR by treating non-normal labels as anomalies."""
-    normal_label = infer_normal_label(y_true)
-    true_anomaly = np.array([str(label).strip() != normal_label for label in y_true])
-    predicted_anomaly = np.array([str(label).strip() != normal_label for label in y_pred])
-
-    tn, fp, _, _ = confusion_matrix(true_anomaly, predicted_anomaly, labels=[False, True]).ravel()
+    """Calculate FP / (FP + TN) for Attack as the positive class."""
+    tn, fp, _, _ = confusion_matrix(y_true, y_pred, labels=[0, 1]).ravel()
     denominator = fp + tn
-    if denominator == 0:
-        return 0.0
-
-    return float(fp / denominator)
-
-
-def prediction_traffic_counts(y_pred):
-    """Count predicted normal and anomalous traffic records."""
-    normal_label = infer_normal_label(y_pred)
-    normal_count = sum(str(label).strip() == normal_label for label in y_pred)
-    anomaly_count = len(y_pred) - normal_count
-
-    return {
-        "predicted_normal_count": int(normal_count),
-        "predicted_anomaly_count": int(anomaly_count),
-    }
-
-
-def roc_auc_percent(y_true, prediction_scores, class_labels):
-    """Calculate ROC-AUC for binary or multiclass classifier probabilities."""
-    if prediction_scores is None or class_labels is None:
-        return None
-
-    class_labels = list(class_labels)
-    if len(class_labels) < 2:
-        return None
-
-    prediction_scores = np.asarray(prediction_scores)
-    y_true_array = np.array([str(label).strip() for label in y_true])
-    class_array = np.array([str(label).strip() for label in class_labels])
-
-    try:
-        if len(class_array) == 2:
-            normal_label = infer_normal_label(class_array)
-            positive_label = next(label for label in class_array if label != normal_label)
-            positive_index = int(np.where(class_array == positive_label)[0][0])
-            y_binary = y_true_array == positive_label
-            score = roc_auc_score(y_binary, prediction_scores[:, positive_index])
-        else:
-            score = roc_auc_score(
-                y_true_array,
-                prediction_scores,
-                labels=class_array,
-                multi_class="ovr",
-                average="weighted",
-            )
-    except (IndexError, StopIteration, ValueError):
-        return None
-
-    return round(score * 100, 2)
+    return float(fp / denominator) if denominator else 0.0
 
 
 def calculate_metrics(
-    model_name,
     y_true,
     y_pred,
-    processing_time,
-    prediction_scores=None,
-    class_labels=None,
-    cpu_usage=None,
-    ram_usage=None,
+    positive_probabilities,
+    cpu_time_seconds,
+    peak_ram_increase_mb,
+    model_size_mb,
+    processing_time_seconds,
 ):
-    """Return the model metrics shown in the comparison table."""
-    traffic_counts = prediction_traffic_counts(y_pred)
+    """Calculate the nine ranking metrics using one shared test split."""
+    if positive_probabilities is None:
+        raise ValueError("Positive-class probabilities are required for ROC-AUC.")
+
+    try:
+        roc_auc = roc_auc_score(y_true, positive_probabilities)
+    except ValueError as error:
+        raise ValueError(f"ROC-AUC could not be calculated: {error}") from error
 
     return {
-        "model_name": model_name,
-        "accuracy": round(accuracy_score(y_true, y_pred) * 100, 2),
-        "precision": round(precision_score(y_true, y_pred, average="weighted", zero_division=0) * 100, 2),
-        "recall": round(recall_score(y_true, y_pred, average="weighted", zero_division=0) * 100, 2),
-        "f1_score": round(f1_score(y_true, y_pred, average="weighted", zero_division=0) * 100, 2),
-        "roc_auc": roc_auc_percent(y_true, prediction_scores, class_labels),
-        "false_positive_rate": round(false_positive_rate(y_true, y_pred) * 100, 2),
-        "cpu_usage": round(cpu_usage, 2) if cpu_usage is not None else None,
-        "ram_usage": round(ram_usage, 2) if ram_usage is not None else None,
-        "processing_time": round(processing_time, 4),
-        **traffic_counts,
+        "accuracy": round(accuracy_score(y_true, y_pred) * 100, 6),
+        "precision": round(
+            precision_score(y_true, y_pred, pos_label=1, zero_division=0) * 100,
+            6,
+        ),
+        "recall": round(
+            recall_score(y_true, y_pred, pos_label=1, zero_division=0) * 100,
+            6,
+        ),
+        "f1_score": round(
+            f1_score(y_true, y_pred, pos_label=1, zero_division=0) * 100,
+            6,
+        ),
+        "roc_auc": round(float(roc_auc) * 100, 6),
+        "false_positive_rate": round(
+            false_positive_rate(y_true, y_pred) * 100,
+            6,
+        ),
+        # cpu_usage is process CPU time in seconds for fit plus test prediction.
+        "cpu_usage": round(float(cpu_time_seconds), 6),
+        # ram_usage is peak process RSS increase in MB over the same interval.
+        "ram_usage": round(float(peak_ram_increase_mb), 6),
+        "model_size": round(float(model_size_mb), 6),
+        "processing_time": round(float(processing_time_seconds), 6),
+        "predicted_normal_count": int(np.sum(np.asarray(y_pred) == 0)),
+        "predicted_anomaly_count": int(np.sum(np.asarray(y_pred) == 1)),
     }
 
 
-def identify_best_model(model_results):
-    """Choose the best model by F1-score, accuracy, FPR, and processing time."""
-    return sorted(
-        model_results,
+def _valid_number(value):
+    return isinstance(value, (int, float, np.number)) and math.isfinite(float(value))
+
+
+def normalize_model_results(model_results):
+    """Min-max normalize exactly nine metrics across valid candidates."""
+    valid_results = []
+    for result in model_results:
+        if result.get("status") != "completed":
+            result["normalized_metrics"] = None
+            result["overall_score"] = None
+            continue
+
+        missing = [metric for metric in RANKING_METRICS if not _valid_number(result.get(metric))]
+        if missing:
+            result["status"] = "incomplete"
+            result["error_message"] = "Missing or invalid required metrics: " + ", ".join(missing)
+            result["normalized_metrics"] = None
+            result["overall_score"] = None
+            continue
+        valid_results.append(result)
+
+    if not valid_results:
+        return model_results
+
+    bounds = {
+        metric: (
+            min(float(result[metric]) for result in valid_results),
+            max(float(result[metric]) for result in valid_results),
+        )
+        for metric in RANKING_METRICS
+    }
+
+    for result in valid_results:
+        normalized = {}
+        for metric, direction in METRIC_DIRECTIONS.items():
+            minimum, maximum = bounds[metric]
+            if math.isclose(maximum, minimum, rel_tol=1e-12, abs_tol=1e-12):
+                score = 1.0
+            elif direction == "higher":
+                score = (float(result[metric]) - minimum) / (maximum - minimum)
+            else:
+                score = (maximum - float(result[metric])) / (maximum - minimum)
+            normalized[metric] = round(score, 9)
+
+        result["normalized_metrics"] = normalized
+        result["overall_score"] = round(
+            sum(normalized[metric] for metric in RANKING_METRICS) / 9,
+            9,
+        )
+
+    return model_results
+
+
+def rank_model_results(model_results):
+    """Rank valid results with the required deterministic tie-break sequence."""
+    eligible = [
+        result
+        for result in model_results
+        if result.get("status") == "completed" and _valid_number(result.get("overall_score"))
+    ]
+
+    ranked = sorted(
+        eligible,
         key=lambda result: (
-            -result["f1_score"],
-            -result["accuracy"],
-            result["false_positive_rate"],
-            result["processing_time"],
+            -float(result["overall_score"]),
+            -float(result["f1_score"]),
+            -float(result["recall"]),
+            -float(result["roc_auc"]),
+            float(result["false_positive_rate"]),
+            float(result["ram_usage"]),
+            float(result["model_size"]),
+            result["model_name"].casefold(),
         ),
-    )[0]
+    )
+
+    for rank, result in enumerate(ranked, start=1):
+        result["rank"] = rank
+    for result in model_results:
+        if result not in ranked:
+            result["rank"] = None
+    return ranked
+
+
+def identify_best_model(model_results):
+    """Return the highest valid normalized score without hard-coded preference."""
+    ranked = rank_model_results(model_results)
+    return ranked[0] if ranked else None

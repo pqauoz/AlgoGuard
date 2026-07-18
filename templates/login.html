@@ -6,11 +6,11 @@
 {% block content %}
 <section class="login-page">
     <div class="login-identity">
-        <span class="brand-mark login-brand-mark"><i class="bi bi-shield-lock"></i></span>
+        <span class="brand-mark login-brand-mark"><i class="bi bi-shield-lock-fill"></i></span>
         <div>
             <p class="eyebrow">Administrator Access</p>
             <h1>AlgoGuard</h1>
-            <p class="header-copy">Secure entry for the anomaly detection dashboard, dataset training workflow, simulation console, and audit records.</p>
+            <p class="header-copy">Network anomaly detection and model operations.</p>
         </div>
         <div class="login-signal-grid">
             <span>Dataset Training</span>
@@ -26,7 +26,7 @@
                 <p class="eyebrow">Login</p>
                 <h2>Admin Console</h2>
             </div>
-            <span class="status-pill active">Protected</span>
+            <span class="status-badge success">Protected</span>
         </div>
 
         <div>
@@ -44,10 +44,7 @@
             Sign In
         </button>
 
-        <div class="login-note">
-            <strong>Default local account</strong>
-            <span>admin / admin123</span>
-        </div>
+        <div class="login-note"><strong>Local administrator access</strong><span>Credentials are configured on the server.</span></div>
     </form>
 </section>
 {% endblock %}

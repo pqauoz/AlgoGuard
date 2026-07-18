@@ -1,53 +1,99 @@
-import os
+import time
 
-from services.simulation.feature_extractor import FeatureExtractor
-from services.simulation.flow_builder import FlowBuilder
-from services.simulation.model_loader import ModelLoader
-from services.simulation.predictor import Predictor
-from services.simulation.preprocessor import Preprocessor
+import numpy as np
+import pandas as pd
 
-
-SIMULATION_MODEL_NAME = os.environ.get("ALGOGUARD_SIMULATION_MODEL", "Stacking_Top3_LR")
-
-_simulation_runtime = None
+from services.deployment_service import DeploymentError, load_active_artifact
 
 
 class SimulationServiceError(RuntimeError):
-    """Raised when the pretrained simulation model cannot run."""
+    """Raised when manual prediction cannot safely use the active deployment."""
 
 
-class SimulationService:
-    """Run manual flow detection with the pretrained simulation engine."""
+def get_simulation_schema():
+    """Return dynamic feature metadata for the current deployed pipeline."""
+    try:
+        artifact, deployment = load_active_artifact()
+    except DeploymentError as error:
+        return {"available": False, "message": str(error), "fields": [], "deployment": None}
 
-    def __init__(self):
-        try:
-            preprocessor = Preprocessor()
-            preprocessor.feature_extractor = FeatureExtractor()
-            model = ModelLoader().load_model(SIMULATION_MODEL_NAME)
-        except Exception as error:
-            raise SimulationServiceError(f"Unable to load pretrained simulation model: {error}") from error
-
-        self.predictor = Predictor(model, preprocessor)
-        self.flow_builder = FlowBuilder()
-
-    def predict(self, payload):
-        """Build a flow from user input and return the model prediction."""
-        flow_data = self.flow_builder.build_from_json(payload or {})
-        prediction_label, confidence = self.predictor.predict(flow_data)
-        prediction = "Attack" if prediction_label == 1 else "Normal"
-
-        return {
-            "prediction": prediction,
-            "confidence": round(confidence * 100, 2),
-            "flow_data": flow_data,
+    numeric_columns = set(artifact.get("numeric_columns") or [])
+    defaults = artifact.get("feature_defaults") or {}
+    fields = [
+        {
+            "name": column,
+            "label": str(column).replace("_", " ").title(),
+            "type": "number" if column in numeric_columns else "text",
+            "default": defaults.get(column, ""),
         }
+        for column in artifact.get("feature_columns", [])
+    ]
+    return {
+        "available": True,
+        "message": None,
+        "fields": fields,
+        "deployment": deployment,
+    }
+
+
+def _build_input_frame(payload, artifact):
+    feature_columns = artifact.get("feature_columns") or []
+    numeric_columns = set(artifact.get("numeric_columns") or [])
+    defaults = artifact.get("feature_defaults") or {}
+    if not feature_columns:
+        raise SimulationServiceError("The deployed artifact has no feature schema.")
+
+    row = {}
+    for column in feature_columns:
+        value = payload.get(column, defaults.get(column))
+        if column in numeric_columns:
+            if value in (None, ""):
+                row[column] = np.nan
+            else:
+                try:
+                    row[column] = float(value)
+                except (TypeError, ValueError) as error:
+                    raise SimulationServiceError(
+                        f"{column} must contain a numerical value."
+                    ) from error
+        else:
+            row[column] = None if value in (None, "") else str(value)
+    return pd.DataFrame([row], columns=feature_columns), row
 
 
 def run_simulation(payload):
-    """Run the singleton simulation service."""
-    global _simulation_runtime
+    """Predict one manual record using only the active deployed artifact."""
+    try:
+        artifact, deployment = load_active_artifact()
+    except DeploymentError as error:
+        raise SimulationServiceError(str(error)) from error
 
-    if _simulation_runtime is None:
-        _simulation_runtime = SimulationService()
+    frame, flow_data = _build_input_frame(payload or {}, artifact)
+    pipeline = artifact.get("pipeline")
+    if pipeline is None:
+        raise SimulationServiceError("The deployed artifact does not contain a pipeline.")
 
-    return _simulation_runtime.predict(payload)
+    start = time.perf_counter()
+    try:
+        predicted_value = int(pipeline.predict(frame)[0])
+        probabilities = np.asarray(pipeline.predict_proba(frame))[0]
+        classes = list(pipeline.classes_)
+        if predicted_value not in classes:
+            raise ValueError("Predicted class is not present in the probability output.")
+        confidence = float(probabilities[classes.index(predicted_value)])
+    except Exception as error:
+        raise SimulationServiceError(f"Prediction failed: {error}") from error
+    latency_ms = (time.perf_counter() - start) * 1000
+
+    prediction = "Attack" if predicted_value == 1 else "Normal"
+    return {
+        "prediction": prediction,
+        "confidence": round(confidence * 100, 2),
+        "deployed_model_name": deployment["model_name"],
+        "deployment_id": deployment["deployment_id"],
+        "model_id": deployment["model_id"],
+        "source_run_id": deployment["run_id"],
+        "latency_ms": round(latency_ms, 3),
+        "alert_created": prediction == "Attack",
+        "flow_data": flow_data,
+    }

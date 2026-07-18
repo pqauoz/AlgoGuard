@@ -1,3 +1,4 @@
+import json
 import os
 import sqlite3
 from datetime import datetime, timezone
@@ -7,34 +8,89 @@ from werkzeug.security import generate_password_hash
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 DATABASE_FOLDER = os.path.join(BASE_DIR, "database")
-DATABASE_PATH = os.path.join(DATABASE_FOLDER, "algoguard.sqlite3")
-SIMULATION_MODEL_NAME = os.environ.get("ALGOGUARD_SIMULATION_MODEL", "Stacking_Top3_LR")
-DETECTION_MODEL_COLUMN_MIGRATIONS = {
-    "roc_auc": "REAL",
-    "cpu_usage": "REAL",
-    "ram_usage": "REAL",
-    "model_size": "REAL",
+DATABASE_PATH = os.path.abspath(
+    os.environ.get(
+        "ALGOGUARD_DATABASE_PATH",
+        os.path.join(DATABASE_FOLDER, "algoguard.sqlite3"),
+    )
+)
+
+
+class ClosingSQLiteConnection(sqlite3.Connection):
+    """Commit or roll back, then release the SQLite file handle."""
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        try:
+            return super().__exit__(exc_type, exc_value, traceback)
+        finally:
+            self.close()
+
+
+MODEL_RESULT_COLUMNS = {
+    "run_id": "INTEGER",
+    "model_type": "TEXT",
+    "evaluation_status": "TEXT NOT NULL DEFAULT 'completed'",
+    "error_message": "TEXT",
+    "normalized_accuracy": "REAL",
+    "normalized_precision": "REAL",
+    "normalized_recall": "REAL",
+    "normalized_f1": "REAL",
+    "normalized_roc_auc": "REAL",
+    "normalized_fpr": "REAL",
+    "normalized_cpu": "REAL",
+    "normalized_ram": "REAL",
+    "normalized_model_size": "REAL",
+    "overall_score": "REAL",
+    "rank": "INTEGER",
+    "artifact_path": "TEXT",
+    "is_recommended": "INTEGER NOT NULL DEFAULT 0",
+    "is_deployed": "INTEGER NOT NULL DEFAULT 0",
+    "deployed_at": "TEXT",
+}
+
+PREDICTION_COLUMNS = {
+    "deployment_id": "INTEGER",
+    "model_name": "TEXT",
+    "latency_ms": "REAL",
+    "alert_created": "INTEGER NOT NULL DEFAULT 0",
+    "input_payload": "TEXT",
+}
+
+SYSTEM_LOG_COLUMNS = {
+    "message": "TEXT",
+    "run_id": "INTEGER",
+    "dataset_filename": "TEXT",
+    "model_name": "TEXT",
+    "prediction_id": "INTEGER",
+}
+
+TRAINING_RUN_COUNT_COLUMNS = {
+    "normal_count": "INTEGER",
+    "anomaly_count": "INTEGER",
 }
 
 
 def utc_now():
-    """Return a database-friendly UTC timestamp."""
+    """Return a sortable UTC timestamp for SQLite records."""
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def get_connection():
-    """Open a SQLite connection with dictionary-like rows."""
-    os.makedirs(DATABASE_FOLDER, exist_ok=True)
-    connection = sqlite3.connect(DATABASE_PATH)
+    """Open a SQLite connection with foreign keys and dictionary-like rows."""
+    os.makedirs(os.path.dirname(DATABASE_PATH), exist_ok=True)
+    connection = sqlite3.connect(
+        DATABASE_PATH,
+        timeout=30,
+        factory=ClosingSQLiteConnection,
+    )
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")
+    connection.execute("PRAGMA busy_timeout = 30000")
     return connection
 
 
 def initialize_database():
-    """Create all AlgoGuard database tables and seed a default admin."""
-    os.makedirs(DATABASE_FOLDER, exist_ok=True)
-
+    """Create the baseline schema, apply additive migrations, and seed an admin."""
     with get_connection() as connection:
         connection.executescript(
             """
@@ -47,22 +103,35 @@ def initialize_database():
                 created_at TEXT NOT NULL
             );
 
-            CREATE TABLE IF NOT EXISTS network_traffic (
-                traffic_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL,
-                source_ip TEXT,
-                destination_ip TEXT,
-                source_port INTEGER,
-                destination_port INTEGER,
-                protocol TEXT,
-                packet_size INTEGER,
-                flags TEXT,
-                dataset_source TEXT
+            CREATE TABLE IF NOT EXISTS training_run (
+                run_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                admin_id INTEGER,
+                filename TEXT NOT NULL,
+                stored_filename TEXT,
+                upload_timestamp TEXT NOT NULL,
+                row_count INTEGER,
+                feature_count INTEGER,
+                normal_count INTEGER,
+                anomaly_count INTEGER,
+                target_column TEXT,
+                class_distribution TEXT,
+                validation_status TEXT NOT NULL DEFAULT 'pending',
+                preprocessing_status TEXT NOT NULL DEFAULT 'pending',
+                training_status TEXT NOT NULL DEFAULT 'pending',
+                recommended_model_id INTEGER,
+                recommended_model_name TEXT,
+                recommended_score REAL,
+                deployment_status TEXT NOT NULL DEFAULT 'not_deployed',
+                completed_at TEXT,
+                error_message TEXT,
+                FOREIGN KEY (admin_id) REFERENCES admin (admin_id)
             );
 
             CREATE TABLE IF NOT EXISTS detection_model (
                 model_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id INTEGER,
                 model_name TEXT NOT NULL,
+                model_type TEXT,
                 version TEXT,
                 training_date TEXT,
                 accuracy REAL,
@@ -75,18 +144,71 @@ def initialize_database():
                 cpu_usage REAL,
                 ram_usage REAL,
                 training_time REAL,
-                model_size REAL
+                model_size REAL,
+                evaluation_status TEXT NOT NULL DEFAULT 'completed',
+                error_message TEXT,
+                normalized_accuracy REAL,
+                normalized_precision REAL,
+                normalized_recall REAL,
+                normalized_f1 REAL,
+                normalized_roc_auc REAL,
+                normalized_fpr REAL,
+                normalized_cpu REAL,
+                normalized_ram REAL,
+                normalized_model_size REAL,
+                overall_score REAL,
+                rank INTEGER,
+                artifact_path TEXT,
+                is_recommended INTEGER NOT NULL DEFAULT 0,
+                is_deployed INTEGER NOT NULL DEFAULT 0,
+                deployed_at TEXT,
+                FOREIGN KEY (run_id) REFERENCES training_run (run_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS model_deployment (
+                deployment_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                model_id INTEGER NOT NULL,
+                run_id INTEGER NOT NULL,
+                deployed_by INTEGER,
+                artifact_path TEXT NOT NULL,
+                deployed_at TEXT NOT NULL,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                replaced_deployment_id INTEGER,
+                FOREIGN KEY (model_id) REFERENCES detection_model (model_id),
+                FOREIGN KEY (run_id) REFERENCES training_run (run_id),
+                FOREIGN KEY (deployed_by) REFERENCES admin (admin_id),
+                FOREIGN KEY (replaced_deployment_id) REFERENCES model_deployment (deployment_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS network_traffic (
+                traffic_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                source_ip TEXT,
+                destination_ip TEXT,
+                source_port INTEGER,
+                destination_port INTEGER,
+                protocol TEXT,
+                packet_size INTEGER,
+                flags TEXT,
+                dataset_source TEXT,
+                feature_payload TEXT
             );
 
             CREATE TABLE IF NOT EXISTS prediction (
                 prediction_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 traffic_id INTEGER NOT NULL,
                 model_id INTEGER NOT NULL,
+                deployment_id INTEGER,
+                model_name TEXT,
                 predicted_label TEXT NOT NULL,
                 confidence_score REAL,
                 prediction_timestamp TEXT NOT NULL,
+                latency_ms REAL,
+                alert_created INTEGER NOT NULL DEFAULT 0,
+                input_payload TEXT,
                 FOREIGN KEY (traffic_id) REFERENCES network_traffic (traffic_id),
-                FOREIGN KEY (model_id) REFERENCES detection_model (model_id)
+                FOREIGN KEY (model_id) REFERENCES detection_model (model_id),
+                FOREIGN KEY (deployment_id) REFERENCES model_deployment (deployment_id)
             );
 
             CREATE TABLE IF NOT EXISTS alert (
@@ -102,11 +224,13 @@ def initialize_database():
             CREATE TABLE IF NOT EXISTS report (
                 report_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 admin_id INTEGER,
+                run_id INTEGER,
                 report_type TEXT NOT NULL,
                 date_range_start TEXT,
                 date_range_end TEXT,
                 generated_at TEXT NOT NULL,
-                FOREIGN KEY (admin_id) REFERENCES admin (admin_id)
+                FOREIGN KEY (admin_id) REFERENCES admin (admin_id),
+                FOREIGN KEY (run_id) REFERENCES training_run (run_id)
             );
 
             CREATE TABLE IF NOT EXISTS report_alert (
@@ -123,29 +247,109 @@ def initialize_database():
                 module TEXT NOT NULL,
                 action TEXT NOT NULL,
                 status TEXT NOT NULL,
+                message TEXT,
+                run_id INTEGER,
+                dataset_filename TEXT,
+                model_name TEXT,
+                prediction_id INTEGER,
                 ip_address TEXT,
                 timestamp TEXT NOT NULL,
-                FOREIGN KEY (admin_id) REFERENCES admin (admin_id)
+                FOREIGN KEY (admin_id) REFERENCES admin (admin_id),
+                FOREIGN KEY (run_id) REFERENCES training_run (run_id),
+                FOREIGN KEY (prediction_id) REFERENCES prediction (prediction_id)
             );
+
+            CREATE TABLE IF NOT EXISTS schema_migration (
+                version INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                applied_at TEXT NOT NULL
+            );
+
             """
         )
-        _ensure_detection_model_schema(connection)
+        _apply_training_workflow_migration(connection)
+        _apply_traffic_count_migration(connection)
+        _ensure_indexes(connection)
 
     seed_default_admin()
 
 
-def _ensure_detection_model_schema(connection):
-    """Add nullable metric columns when opening an older AlgoGuard database."""
-    existing_columns = {
-        row["name"]
-        for row in connection.execute("PRAGMA table_info(detection_model)").fetchall()
+def _column_names(connection, table_name):
+    return {
+        row["name"] for row in connection.execute(f"PRAGMA table_info({table_name})").fetchall()
     }
 
-    for column_name, column_type in DETECTION_MODEL_COLUMN_MIGRATIONS.items():
-        if column_name not in existing_columns:
-            connection.execute(
-                f"ALTER TABLE detection_model ADD COLUMN {column_name} {column_type}"
-            )
+
+def _add_missing_columns(connection, table_name, columns):
+    existing = _column_names(connection, table_name)
+    for column_name, column_type in columns.items():
+        if column_name not in existing:
+            connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}")
+
+
+def _apply_training_workflow_migration(connection):
+    """Upgrade older databases without deleting or rewriting existing rows."""
+    migration = connection.execute(
+        "SELECT version FROM schema_migration WHERE version = 1"
+    ).fetchone()
+    if migration:
+        return
+
+    _add_missing_columns(connection, "detection_model", MODEL_RESULT_COLUMNS)
+    _add_missing_columns(connection, "prediction", PREDICTION_COLUMNS)
+    _add_missing_columns(connection, "system_log", SYSTEM_LOG_COLUMNS)
+    _add_missing_columns(connection, "network_traffic", {"feature_payload": "TEXT"})
+    _add_missing_columns(connection, "report", {"run_id": "INTEGER"})
+
+    connection.execute(
+        "INSERT INTO schema_migration (version, name, applied_at) VALUES (?, ?, ?)",
+        (1, "seven_model_training_workflow", utc_now()),
+    )
+
+
+def _apply_traffic_count_migration(connection):
+    """Store explicit Normal and Attack counts for every new training run."""
+    migration = connection.execute(
+        "SELECT version FROM schema_migration WHERE version = 2"
+    ).fetchone()
+    if migration:
+        return
+    _add_missing_columns(connection, "training_run", TRAINING_RUN_COUNT_COLUMNS)
+    connection.execute(
+        "INSERT INTO schema_migration (version, name, applied_at) VALUES (?, ?, ?)",
+        (2, "training_run_traffic_counts", utc_now()),
+    )
+
+
+def _ensure_indexes(connection):
+    """Create indexes after every required legacy column has been added."""
+    connection.executescript(
+        """
+        CREATE INDEX IF NOT EXISTS idx_training_run_uploaded
+            ON training_run (upload_timestamp DESC);
+        CREATE INDEX IF NOT EXISTS idx_detection_model_run
+            ON detection_model (run_id, rank);
+        CREATE INDEX IF NOT EXISTS idx_prediction_timestamp
+            ON prediction (prediction_timestamp DESC);
+        CREATE INDEX IF NOT EXISTS idx_alert_detected
+            ON alert (detected_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_system_log_timestamp
+            ON system_log (timestamp DESC);
+        CREATE INDEX IF NOT EXISTS idx_system_log_run
+            ON system_log (run_id, timestamp DESC);
+        CREATE INDEX IF NOT EXISTS idx_model_deployment_active
+            ON model_deployment (is_active, deployed_at DESC);
+        """
+    )
+
+
+def migration_status():
+    """Return applied schema migration records."""
+    with get_connection() as connection:
+        rows = connection.execute(
+            "SELECT version, name, applied_at FROM schema_migration ORDER BY version"
+        ).fetchall()
+        return [dict(row) for row in rows]
 
 
 def seed_default_admin():
@@ -155,10 +359,8 @@ def seed_default_admin():
     email = os.environ.get("ALGOGUARD_ADMIN_EMAIL", "admin@algoguard.local")
 
     with get_connection() as connection:
-        admin_count = connection.execute("SELECT COUNT(*) FROM admin").fetchone()[0]
-        if admin_count:
+        if connection.execute("SELECT COUNT(*) FROM admin").fetchone()[0]:
             return
-
         connection.execute(
             """
             INSERT INTO admin (username, password_hash, email, role, created_at)
@@ -198,25 +400,19 @@ def create_admin(username, password, email="", role="Administrator"):
     email = str(email or "").strip()
     role = str(role or "Administrator").strip()
 
-    if not username:
-        raise ValueError("Username is required.")
-
     if len(username) < 3:
         raise ValueError("Username must be at least 3 characters.")
-
-    if not password or len(password) < 6:
+    if len(password) < 6:
         raise ValueError("Password must be at least 6 characters.")
-
     if role not in {"Administrator", "Analyst"}:
         raise ValueError("Invalid admin role.")
 
     with get_connection() as connection:
-        existing_admin = connection.execute(
+        existing = connection.execute(
             "SELECT admin_id FROM admin WHERE LOWER(username) = LOWER(?)",
             (username,),
         ).fetchone()
-
-        if existing_admin:
+        if existing:
             raise ValueError("An admin with that username already exists.")
 
         cursor = connection.execute(
@@ -229,40 +425,184 @@ def create_admin(username, password, email="", role="Administrator"):
         return cursor.lastrowid
 
 
-def log_system_event(admin_id, module, action, status, ip_address=None):
-    """Write an audit trail entry to system_log."""
+def log_system_event(
+    admin_id,
+    module,
+    action,
+    status,
+    ip_address=None,
+    message=None,
+    run_id=None,
+    dataset_filename=None,
+    model_name=None,
+    prediction_id=None,
+):
+    """Write a structured, human-readable audit event."""
+    with get_connection() as connection:
+        cursor = connection.execute(
+            """
+            INSERT INTO system_log (
+                admin_id, module, action, status, message, run_id,
+                dataset_filename, model_name, prediction_id, ip_address, timestamp
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                admin_id,
+                module,
+                action,
+                status,
+                message or action,
+                run_id,
+                dataset_filename,
+                model_name,
+                prediction_id,
+                ip_address,
+                utc_now(),
+            ),
+        )
+        return cursor.lastrowid
+
+
+def create_training_run(admin_id, filename, stored_filename=None):
+    """Create one independent record for one uploaded CSV."""
+    with get_connection() as connection:
+        cursor = connection.execute(
+            """
+            INSERT INTO training_run (
+                admin_id, filename, stored_filename, upload_timestamp,
+                validation_status, preprocessing_status, training_status
+            )
+            VALUES (?, ?, ?, ?, 'pending', 'pending', 'pending')
+            """,
+            (admin_id, filename, stored_filename, utc_now()),
+        )
+        return cursor.lastrowid
+
+
+def update_training_run(run_id, **values):
+    """Update allowed training-run status and metadata fields."""
+    allowed = {
+        "stored_filename",
+        "row_count",
+        "feature_count",
+        "normal_count",
+        "anomaly_count",
+        "target_column",
+        "class_distribution",
+        "validation_status",
+        "preprocessing_status",
+        "training_status",
+        "recommended_model_id",
+        "recommended_model_name",
+        "recommended_score",
+        "deployment_status",
+        "completed_at",
+        "error_message",
+    }
+    updates = {key: value for key, value in values.items() if key in allowed}
+    if not updates:
+        return
+    if "class_distribution" in updates and not isinstance(updates["class_distribution"], str):
+        updates["class_distribution"] = json.dumps(updates["class_distribution"])
+
+    assignments = ", ".join(f"{column} = ?" for column in updates)
+    params = list(updates.values()) + [run_id]
     with get_connection() as connection:
         connection.execute(
-            """
-            INSERT INTO system_log (admin_id, module, action, status, ip_address, timestamp)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (admin_id, module, action, status, ip_address, utc_now()),
+            f"UPDATE training_run SET {assignments} WHERE run_id = ?",
+            params,
         )
 
 
-def insert_detection_model(model_result, version="dataset-workflow"):
-    """Persist one model evaluation row from the training workflow."""
-    fpr = _safe_float(model_result.get("false_positive_rate"))
-    specificity = round(100 - fpr, 2) if fpr is not None else None
-    model_path = model_result.get("model_path")
-    model_size = _safe_float(model_result.get("model_size"))
+def _decode_run(row):
+    if not row:
+        return None
+    result = dict(row)
+    raw_distribution = result.get("class_distribution")
+    if raw_distribution:
+        try:
+            result["class_distribution"] = json.loads(raw_distribution)
+        except json.JSONDecodeError:
+            result["class_distribution"] = {}
+    else:
+        result["class_distribution"] = {}
+    return result
 
-    if model_size is None and model_path and os.path.exists(model_path):
-        model_size = round(os.path.getsize(model_path) / (1024 * 1024), 2)
+
+def get_training_run(run_id):
+    """Return one training run."""
+    with get_connection() as connection:
+        row = connection.execute(
+            "SELECT * FROM training_run WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()
+        return _decode_run(row)
+
+
+def get_latest_training_run():
+    """Return the newest training run."""
+    with get_connection() as connection:
+        row = connection.execute(
+            "SELECT * FROM training_run ORDER BY run_id DESC LIMIT 1"
+        ).fetchone()
+        return _decode_run(row)
+
+
+def list_training_runs(page=1, per_page=20):
+    """Return independent training runs with pagination."""
+    page = max(int(page), 1)
+    per_page = max(min(int(per_page), 100), 1)
+    offset = (page - 1) * per_page
+    with get_connection() as connection:
+        total = connection.execute("SELECT COUNT(*) FROM training_run").fetchone()[0]
+        rows = connection.execute(
+            """
+            SELECT tr.*, a.username AS admin_username,
+                   COUNT(dm.model_id) AS model_result_count
+            FROM training_run tr
+            LEFT JOIN admin a ON a.admin_id = tr.admin_id
+            LEFT JOIN detection_model dm ON dm.run_id = tr.run_id
+            GROUP BY tr.run_id
+            ORDER BY tr.run_id DESC
+            LIMIT ? OFFSET ?
+            """,
+            (per_page, offset),
+        ).fetchall()
+    return {
+        "items": [_decode_run(row) for row in rows],
+        "page": page,
+        "per_page": per_page,
+        "total": total,
+        "pages": max((total + per_page - 1) // per_page, 1),
+    }
+
+
+def insert_model_result(run_id, model_result, version="seven-model-v1"):
+    """Persist raw metrics, normalized metrics, score, and artifact metadata."""
+    normalized = model_result.get("normalized_metrics") or {}
+    fpr = _safe_float(model_result.get("false_positive_rate"))
+    specificity = round(100 - fpr, 6) if fpr is not None else None
 
     with get_connection() as connection:
         cursor = connection.execute(
             """
             INSERT INTO detection_model (
-                model_name, version, training_date, accuracy, precision_score,
-                recall, f1_score, specificity, fpr, roc_auc, cpu_usage,
-                ram_usage, training_time, model_size
+                run_id, model_name, model_type, version, training_date,
+                accuracy, precision_score, recall, f1_score, specificity,
+                fpr, roc_auc, cpu_usage, ram_usage, training_time, model_size,
+                evaluation_status, error_message,
+                normalized_accuracy, normalized_precision, normalized_recall,
+                normalized_f1, normalized_roc_auc, normalized_fpr,
+                normalized_cpu, normalized_ram, normalized_model_size,
+                overall_score, rank, artifact_path, is_recommended
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
+                run_id,
                 model_result.get("model_name"),
+                model_result.get("model_type"),
                 version,
                 utc_now(),
                 _safe_float(model_result.get("accuracy")),
@@ -275,45 +615,163 @@ def insert_detection_model(model_result, version="dataset-workflow"):
                 _safe_float(model_result.get("cpu_usage")),
                 _safe_float(model_result.get("ram_usage")),
                 _safe_float(model_result.get("processing_time")),
-                model_size,
+                _safe_float(model_result.get("model_size")),
+                model_result.get("status", "completed"),
+                model_result.get("error_message"),
+                _safe_float(normalized.get("accuracy")),
+                _safe_float(normalized.get("precision")),
+                _safe_float(normalized.get("recall")),
+                _safe_float(normalized.get("f1_score")),
+                _safe_float(normalized.get("roc_auc")),
+                _safe_float(normalized.get("false_positive_rate")),
+                _safe_float(normalized.get("cpu_usage")),
+                _safe_float(normalized.get("ram_usage")),
+                _safe_float(normalized.get("model_size")),
+                _safe_float(model_result.get("overall_score")),
+                model_result.get("rank"),
+                model_result.get("model_path"),
+                int(bool(model_result.get("is_recommended"))),
             ),
         )
         return cursor.lastrowid
 
 
-def get_or_create_simulation_model():
-    """Return the database id for the pretrained simulation model."""
-    model_name = SIMULATION_MODEL_NAME
-    version = "pretrained-simulation"
+def save_training_results(run_id, model_results, best_model):
+    """Save all seven result rows and connect the recommended model to the run."""
+    model_ids = {}
+    for result in model_results:
+        result["is_recommended"] = bool(
+            best_model and result.get("model_name") == best_model.get("model_name")
+        )
+        model_ids[result.get("model_name")] = insert_model_result(run_id, result)
 
+    if best_model:
+        best_id = model_ids[best_model["model_name"]]
+        update_training_run(
+            run_id,
+            recommended_model_id=best_id,
+            recommended_model_name=best_model["model_name"],
+            recommended_score=best_model["overall_score"],
+            training_status="completed",
+            completed_at=utc_now(),
+            error_message=None,
+        )
+        return best_id
+
+    update_training_run(
+        run_id,
+        training_status="failed",
+        completed_at=utc_now(),
+        error_message="No model completed all nine required metrics.",
+    )
+    return None
+
+
+def list_model_results(run_id):
+    """Return model evaluations for one run, ranked when available."""
+    with get_connection() as connection:
+        rows = connection.execute(
+            """
+            SELECT * FROM detection_model
+            WHERE run_id = ?
+            ORDER BY CASE WHEN rank IS NULL THEN 1 ELSE 0 END, rank, model_name
+            """,
+            (run_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
+def get_model_result(model_id):
+    """Return one deployable model result and its run metadata."""
     with get_connection() as connection:
         row = connection.execute(
             """
-            SELECT model_id FROM detection_model
-            WHERE model_name = ? AND version = ?
-            ORDER BY model_id DESC
-            LIMIT 1
+            SELECT dm.*, tr.filename, tr.deployment_status
+            FROM detection_model dm
+            LEFT JOIN training_run tr ON tr.run_id = dm.run_id
+            WHERE dm.model_id = ?
             """,
-            (model_name, version),
+            (model_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def record_deployment(model_id, run_id, deployed_by, artifact_path):
+    """Activate one deployment and preserve replacement history."""
+    with get_connection() as connection:
+        previous = connection.execute(
+            "SELECT * FROM model_deployment WHERE is_active = 1 LIMIT 1"
         ).fetchone()
 
-        if row:
-            return row["model_id"]
+        connection.execute("UPDATE model_deployment SET is_active = 0 WHERE is_active = 1")
+        connection.execute("UPDATE detection_model SET is_deployed = 0 WHERE is_deployed = 1")
+        if previous:
+            connection.execute(
+                "UPDATE training_run SET deployment_status = 'replaced' WHERE run_id = ?",
+                (previous["run_id"],),
+            )
 
+        deployed_at = utc_now()
         cursor = connection.execute(
             """
-            INSERT INTO detection_model (model_name, version, training_date)
-            VALUES (?, ?, ?)
+            INSERT INTO model_deployment (
+                model_id, run_id, deployed_by, artifact_path, deployed_at,
+                is_active, replaced_deployment_id
+            )
+            VALUES (?, ?, ?, ?, ?, 1, ?)
             """,
-            (model_name, version, utc_now()),
+            (
+                model_id,
+                run_id,
+                deployed_by,
+                artifact_path,
+                deployed_at,
+                previous["deployment_id"] if previous else None,
+            ),
         )
-        return cursor.lastrowid
+        connection.execute(
+            """
+            UPDATE detection_model
+            SET is_deployed = 1, deployed_at = ?
+            WHERE model_id = ?
+            """,
+            (deployed_at, model_id),
+        )
+        connection.execute(
+            "UPDATE training_run SET deployment_status = 'deployed' WHERE run_id = ?",
+            (run_id,),
+        )
+        return {
+            "deployment_id": cursor.lastrowid,
+            "previous": dict(previous) if previous else None,
+            "deployed_at": deployed_at,
+        }
+
+
+def get_active_deployment():
+    """Return the currently active deployment and model/run metadata."""
+    with get_connection() as connection:
+        row = connection.execute(
+            """
+            SELECT md.*, dm.model_name, dm.model_type, dm.overall_score,
+                   dm.accuracy, dm.precision_score, dm.recall, dm.f1_score,
+                   dm.roc_auc, dm.fpr, dm.cpu_usage, dm.ram_usage, dm.model_size,
+                   tr.filename, tr.upload_timestamp
+            FROM model_deployment md
+            JOIN detection_model dm ON dm.model_id = md.model_id
+            JOIN training_run tr ON tr.run_id = md.run_id
+            WHERE md.is_active = 1
+            ORDER BY md.deployment_id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        return dict(row) if row else None
 
 
 def insert_network_traffic_from_flow(flow_data, dataset_source="simulation"):
-    """Store one traffic-flow record using the database design fields."""
-    source_bytes = _safe_float(flow_data.get("sbytes"), 0)
-    destination_bytes = _safe_float(flow_data.get("dbytes"), 0)
+    """Store one manual traffic record while retaining its full feature payload."""
+    source_bytes = _safe_float(flow_data.get("sbytes"), 0) or 0
+    destination_bytes = _safe_float(flow_data.get("dbytes"), 0) or 0
     packet_size = _safe_int(
         flow_data.get("packet_size"),
         int(source_bytes + destination_bytes),
@@ -324,9 +782,10 @@ def insert_network_traffic_from_flow(flow_data, dataset_source="simulation"):
             """
             INSERT INTO network_traffic (
                 timestamp, source_ip, destination_ip, source_port,
-                destination_port, protocol, packet_size, flags, dataset_source
+                destination_port, protocol, packet_size, flags,
+                dataset_source, feature_payload
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 str(flow_data.get("timestamp") or utc_now()),
@@ -338,35 +797,60 @@ def insert_network_traffic_from_flow(flow_data, dataset_source="simulation"):
                 packet_size,
                 str(flow_data.get("flags") or flow_data.get("state") or ""),
                 dataset_source,
+                json.dumps(flow_data, default=str),
             ),
         )
         return cursor.lastrowid
 
 
-def insert_prediction(traffic_id, model_id, predicted_label, confidence_score=None):
-    """Store one prediction record."""
+def insert_prediction(
+    traffic_id,
+    model_id,
+    predicted_label,
+    confidence_score=None,
+    deployment_id=None,
+    model_name=None,
+    latency_ms=None,
+    input_payload=None,
+    alert_created=False,
+):
+    """Store a single-record prediction without dataset-level metrics."""
     with get_connection() as connection:
         cursor = connection.execute(
             """
             INSERT INTO prediction (
-                traffic_id, model_id, predicted_label, confidence_score,
-                prediction_timestamp
+                traffic_id, model_id, deployment_id, model_name,
+                predicted_label, confidence_score, prediction_timestamp,
+                latency_ms, alert_created, input_payload
             )
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 traffic_id,
                 model_id,
+                deployment_id,
+                model_name,
                 str(predicted_label),
                 _safe_float(confidence_score),
                 utc_now(),
+                _safe_float(latency_ms),
+                int(bool(alert_created)),
+                json.dumps(input_payload or {}, default=str),
             ),
         )
         return cursor.lastrowid
 
 
+def mark_prediction_alert_created(prediction_id):
+    with get_connection() as connection:
+        connection.execute(
+            "UPDATE prediction SET alert_created = 1 WHERE prediction_id = ?",
+            (prediction_id,),
+        )
+
+
 def insert_alert(prediction_id, severity_level, description, alert_status="Open"):
-    """Store an alert for an anomalous prediction."""
+    """Store an attack alert linked to one prediction."""
     with get_connection() as connection:
         cursor = connection.execute(
             """
@@ -380,23 +864,158 @@ def insert_alert(prediction_id, severity_level, description, alert_status="Open"
         return cursor.lastrowid
 
 
-def insert_report(admin_id, report_type, date_range_start=None, date_range_end=None):
-    """Store a generated report record."""
+def list_alerts(limit=100):
+    """Return newest anomalous prediction alerts."""
+    with get_connection() as connection:
+        rows = connection.execute(
+            """
+            SELECT a.*, p.predicted_label, p.confidence_score, p.model_name,
+                   p.prediction_timestamp
+            FROM alert a
+            JOIN prediction p ON p.prediction_id = a.prediction_id
+            ORDER BY a.alert_id DESC
+            LIMIT ?
+            """,
+            (int(limit),),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
+def get_latest_prediction():
+    """Return the newest manual prediction."""
+    with get_connection() as connection:
+        row = connection.execute(
+            """
+            SELECT * FROM prediction
+            ORDER BY prediction_id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def list_system_logs(filters=None, page=1, per_page=25):
+    """Return newest-first, safely filtered system logs with pagination."""
+    filters = filters or {}
+    page = max(int(page), 1)
+    per_page = max(min(int(per_page), 100), 1)
+    conditions = []
+    params = []
+
+    if filters.get("date_from"):
+        conditions.append("date(sl.timestamp) >= date(?)")
+        params.append(filters["date_from"])
+    if filters.get("date_to"):
+        conditions.append("date(sl.timestamp) <= date(?)")
+        params.append(filters["date_to"])
+    if filters.get("module"):
+        conditions.append("sl.module = ?")
+        params.append(filters["module"])
+    if filters.get("status"):
+        conditions.append("sl.status = ?")
+        params.append(filters["status"])
+    if filters.get("model"):
+        conditions.append("sl.model_name = ?")
+        params.append(filters["model"])
+    if filters.get("run_id"):
+        conditions.append("sl.run_id = ?")
+        params.append(filters["run_id"])
+    if filters.get("search"):
+        search = f"%{filters['search']}%"
+        conditions.append(
+            "(sl.message LIKE ? OR sl.action LIKE ? OR sl.dataset_filename LIKE ? "
+            "OR sl.model_name LIKE ? OR CAST(sl.run_id AS TEXT) LIKE ?)"
+        )
+        params.extend([search, search, search, search, search])
+
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    offset = (page - 1) * per_page
+    with get_connection() as connection:
+        total = connection.execute(
+            f"SELECT COUNT(*) FROM system_log sl {where}",
+            params,
+        ).fetchone()[0]
+        rows = connection.execute(
+            f"""
+            SELECT sl.*, a.username AS admin_username
+            FROM system_log sl
+            LEFT JOIN admin a ON a.admin_id = sl.admin_id
+            {where}
+            ORDER BY sl.log_id DESC
+            LIMIT ? OFFSET ?
+            """,
+            params + [per_page, offset],
+        ).fetchall()
+
+    return {
+        "items": [dict(row) for row in rows],
+        "page": page,
+        "per_page": per_page,
+        "total": total,
+        "pages": max((total + per_page - 1) // per_page, 1),
+    }
+
+
+def get_log_filter_options():
+    """Return distinct values used by the System Logs filters."""
+    with get_connection() as connection:
+        modules = [
+            row[0]
+            for row in connection.execute(
+                "SELECT DISTINCT module FROM system_log ORDER BY module"
+            ).fetchall()
+            if row[0]
+        ]
+        statuses = [
+            row[0]
+            for row in connection.execute(
+                "SELECT DISTINCT status FROM system_log ORDER BY status"
+            ).fetchall()
+            if row[0]
+        ]
+        models = [
+            row[0]
+            for row in connection.execute(
+                """
+                SELECT DISTINCT model_name FROM system_log
+                WHERE model_name IS NOT NULL AND model_name != ''
+                ORDER BY model_name
+                """
+            ).fetchall()
+        ]
+    return {"modules": modules, "statuses": statuses, "models": models}
+
+
+def insert_report(
+    admin_id,
+    report_type,
+    date_range_start=None,
+    date_range_end=None,
+    run_id=None,
+):
+    """Store generated report metadata."""
     with get_connection() as connection:
         cursor = connection.execute(
             """
             INSERT INTO report (
-                admin_id, report_type, date_range_start, date_range_end, generated_at
+                admin_id, run_id, report_type,
+                date_range_start, date_range_end, generated_at
             )
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (admin_id, report_type, date_range_start, date_range_end, utc_now()),
+            (
+                admin_id,
+                run_id,
+                report_type,
+                date_range_start,
+                date_range_end,
+                utc_now(),
+            ),
         )
         return cursor.lastrowid
 
 
 def _safe_float(value, default=None):
-    """Convert values from forms, pandas, or NumPy into SQLite-friendly floats."""
     try:
         if value is None or value == "":
             return default
@@ -406,7 +1025,6 @@ def _safe_float(value, default=None):
 
 
 def _safe_int(value, default=None):
-    """Convert values from forms, pandas, or NumPy into SQLite-friendly integers."""
     try:
         if value is None or value == "":
             return default

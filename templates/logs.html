@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block title %}System Logs | AlgoGuard{% endblock %}
+
+{% block content %}
+<header class="page-heading"><div><p class="eyebrow">Audit Trail</p><h1>System Logs</h1><p class="page-meta">{{ logs.total }} matching event{{ '' if logs.total == 1 else 's' }}</p></div></header>
+
+<form class="panel filter-panel" method="get">
+    <div class="filter-grid">
+        <div class="search-field"><label class="form-label" for="search">Search</label><div class="input-icon"><i class="bi bi-search"></i><input class="form-control" id="search" name="search" value="{{ filters.search }}" placeholder="Message, action, dataset, model, run"></div></div>
+        <div><label class="form-label" for="module">Module</label><select class="form-select" id="module" name="module"><option value="">All modules</option>{% for option in filter_options.modules %}<option value="{{ option }}"{% if filters.module == option %} selected{% endif %}>{{ option }}</option>{% endfor %}</select></div>
+        <div><label class="form-label" for="status">Status</label><select class="form-select" id="status" name="status"><option value="">All statuses</option>{% for option in filter_options.statuses %}<option value="{{ option }}"{% if filters.status == option %} selected{% endif %}>{{ option }}</option>{% endfor %}</select></div>
+        <div><label class="form-label" for="model">Model</label><select class="form-select" id="model" name="model"><option value="">All models</option>{% for option in filter_options.models %}<option value="{{ option }}"{% if filters.model == option %} selected{% endif %}>{{ option }}</option>{% endfor %}</select></div>
+        <div><label class="form-label" for="run_id">Run ID</label><input class="form-control" id="run_id" name="run_id" type="number" min="1" value="{{ filters.run_id }}"></div>
+        <div><label class="form-label" for="date_from">From</label><input class="form-control" id="date_from" name="date_from" type="date" value="{{ filters.date_from }}"></div>
+        <div><label class="form-label" for="date_to">To</label><input class="form-control" id="date_to" name="date_to" type="date" value="{{ filters.date_to }}"></div>
+        <div class="filter-actions"><button class="btn btn-accent" type="submit"><i class="bi bi-funnel-fill"></i> Apply</button><a class="btn btn-outline-light" href="{{ url_for('system_logs') }}">Clear</a></div>
+    </div>
+</form>
+
+<section class="panel log-table-panel">
+    <div class="table-responsive">
+        <table class="table data-table align-middle mb-0">
+            <thead><tr><th>ID</th><th>Timestamp</th><th>Module</th><th>Action</th><th>Status</th><th>Message</th><th>Context</th><th>Admin</th><th>IP</th></tr></thead>
+            <tbody>
+                {% for log in logs["items"] %}
+                <tr><td>#{{ log.log_id }}</td><td class="text-nowrap">{{ log.timestamp }}</td><td>{{ log.module }}</td><td><code>{{ log.action }}</code></td><td><span class="status-badge status-{{ log.status|lower }}">{{ log.status }}</span></td><td class="description-cell">{{ log.message }}</td><td>{% if log.run_id %}<a href="{{ url_for('training_results', run_id=log.run_id) }}">Run #{{ log.run_id }}</a>{% endif %}{% if log.dataset_filename %}<small>{{ log.dataset_filename }}</small>{% endif %}{% if log.model_name %}<small>{{ log.model_name }}</small>{% endif %}{% if log.prediction_id %}<small>Prediction #{{ log.prediction_id }}</small>{% endif %}</td><td>{{ log.admin_username or 'System' }}</td><td>{{ log.ip_address or 'N/A' }}</td></tr>
+                {% else %}
+                <tr><td colspan="9"><div class="empty-state"><i class="bi bi-search"></i><h2>No matching logs</h2></div></td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% if logs.pages > 1 %}
+    <nav class="pagination-bar" aria-label="System log pages">
+        <a class="btn btn-sm btn-outline-light{% if logs.page <= 1 %} disabled{% endif %}" href="{{ url_for('system_logs', page=logs.page-1, date_from=filters.date_from, date_to=filters.date_to, module=filters.module, status=filters.status, model=filters.model, run_id=filters.run_id, search=filters.search) }}"><i class="bi bi-chevron-left"></i></a>
+        <span>Page {{ logs.page }} of {{ logs.pages }}</span>
+        <a class="btn btn-sm btn-outline-light{% if logs.page >= logs.pages %} disabled{% endif %}" href="{{ url_for('system_logs', page=logs.page+1, date_from=filters.date_from, date_to=filters.date_to, module=filters.module, status=filters.status, model=filters.model, run_id=filters.run_id, search=filters.search) }}"><i class="bi bi-chevron-right"></i></a>
+    </nav>
+    {% endif %}
+</section>
+{% endblock %}

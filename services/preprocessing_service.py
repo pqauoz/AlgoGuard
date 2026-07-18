@@ -14,7 +14,7 @@ NORMAL_LABELS = {"0", "normal", "benign", "legitimate", "clean"}
 
 @dataclass
 class PreparedDataset:
-    """Container for cleaned data and metadata needed by training services."""
+    """Leakage-safe binary dataset and metadata used by every candidate."""
 
     X_train: pd.DataFrame
     X_test: pd.DataFrame
@@ -24,11 +24,12 @@ class PreparedDataset:
     target_column: str
     numeric_columns: list
     categorical_columns: list
+    feature_defaults: dict
+    label_mapping: dict
     summary: dict
 
 
 def _make_one_hot_encoder():
-    """Create a version-compatible one-hot encoder."""
     try:
         return OneHotEncoder(handle_unknown="ignore", sparse_output=False)
     except TypeError:
@@ -36,114 +37,153 @@ def _make_one_hot_encoder():
 
 
 def build_feature_preprocessor(numeric_columns, categorical_columns):
-    """Build the encoder and scaler used by every model pipeline."""
+    """Build an unfitted transformer that is fitted only inside each pipeline."""
     transformers = []
 
     if numeric_columns:
-        numeric_pipeline = Pipeline(
-            steps=[
-                ("imputer", SimpleImputer(strategy="median")),
-                ("scaler", StandardScaler()),
-            ]
+        transformers.append(
+            (
+                "numeric",
+                Pipeline(
+                    steps=[
+                        ("imputer", SimpleImputer(strategy="median")),
+                        ("scaler", StandardScaler()),
+                    ]
+                ),
+                numeric_columns,
+            )
         )
-        transformers.append(("numeric", numeric_pipeline, numeric_columns))
 
     if categorical_columns:
-        categorical_pipeline = Pipeline(
-            steps=[
-                ("imputer", SimpleImputer(strategy="most_frequent")),
-                ("encoder", _make_one_hot_encoder()),
-            ]
+        transformers.append(
+            (
+                "categorical",
+                Pipeline(
+                    steps=[
+                        ("imputer", SimpleImputer(strategy="most_frequent")),
+                        ("encoder", _make_one_hot_encoder()),
+                    ]
+                ),
+                categorical_columns,
+            )
         )
-        transformers.append(("categorical", categorical_pipeline, categorical_columns))
+
+    if not transformers:
+        raise ValueError("The dataset does not contain usable feature columns.")
 
     return ColumnTransformer(transformers=transformers, remainder="drop")
 
 
-def _normal_anomaly_counts(labels):
-    """Count normal and anomalous rows using common IDS label conventions."""
-    normalized = labels.astype(str).str.strip().str.lower()
-    normal_mask = normalized.isin(NORMAL_LABELS)
-
-    return {
-        "normal_count": int(normal_mask.sum()),
-        "anomaly_count": int((~normal_mask).sum()),
-    }
-
-
-def _validate_dataframe(df):
-    """Validate that a CSV has enough data for supervised classification."""
-    if df.empty:
-        raise ValueError("The uploaded CSV is empty.")
-
-    df = df.dropna(how="all").dropna(axis=1, how="all")
-
-    if df.shape[1] < 2:
-        raise ValueError("The dataset must contain feature columns and one target label column.")
-
-    if df.shape[0] < 4:
-        raise ValueError("The dataset needs at least four rows for training and testing.")
-
-    return df
-
-
-def prepare_dataset(file_path, test_size=0.25, random_state=42):
-    """Load a CSV, validate it, split features and labels, and prepare metadata."""
+def _read_and_validate_csv(file_path):
     try:
-        df = pd.read_csv(file_path)
+        dataframe = pd.read_csv(file_path)
     except Exception as error:
         raise ValueError(f"Unable to read the CSV file. Details: {error}") from error
 
-    df = _validate_dataframe(df)
-    target_column = df.columns[-1]
+    dataframe = dataframe.dropna(how="all")
+    if dataframe.empty:
+        raise ValueError("The uploaded CSV is empty.")
+    if dataframe.shape[1] < 2:
+        raise ValueError(
+            "The dataset must contain at least one feature column and one target column."
+        )
+    if dataframe.columns.duplicated().any():
+        raise ValueError("The CSV contains duplicate column names.")
 
+    target_column = dataframe.columns[-1]
     if not str(target_column).strip():
-        raise ValueError("The last column must be a named target label column.")
+        raise ValueError("The final target column must have a name.")
 
-    raw_target = df[target_column]
+    usable_features = dataframe.iloc[:, :-1].dropna(axis=1, how="all")
+    if usable_features.shape[1] == 0:
+        raise ValueError("The dataset does not contain usable feature columns.")
+
+    dataframe = pd.concat([usable_features, dataframe[[target_column]]], axis=1)
+    return dataframe
+
+
+def _encode_binary_target(raw_target):
     if raw_target.isna().any() or raw_target.astype(str).str.strip().eq("").any():
         raise ValueError("The target label column contains missing values.")
 
-    X = df.iloc[:, :-1].copy()
-    y = raw_target.astype(str).str.strip()
-    X = X.replace([np.inf, -np.inf], np.nan)
+    cleaned = raw_target.astype(str).str.strip()
+    labels = list(cleaned.value_counts().index)
+    if len(labels) != 2:
+        raise ValueError("AlgoGuard requires exactly two target classes: Normal and Attack.")
 
-    class_counts = y.value_counts()
-    if class_counts.size < 2:
-        raise ValueError("The target label column must contain at least two classes.")
+    normal_label = next(
+        (label for label in labels if label.lower() in NORMAL_LABELS),
+        sorted(labels, key=str.lower)[0],
+    )
+    attack_label = next(label for label in labels if label != normal_label)
+    encoded = cleaned.map({normal_label: 0, attack_label: 1}).astype(int)
+    return encoded, {
+        "normal_label": normal_label,
+        "attack_label": attack_label,
+        "output_labels": {"0": "Normal", "1": "Attack"},
+    }
 
-    if class_counts.min() < 2:
-        raise ValueError("Each target class needs at least two rows for a reliable train/test split.")
+
+def _training_defaults(X_train, numeric_columns, categorical_columns):
+    defaults = {}
+    for column in numeric_columns:
+        median = X_train[column].replace([np.inf, -np.inf], np.nan).median()
+        defaults[column] = None if pd.isna(median) else float(median)
+    for column in categorical_columns:
+        mode = X_train[column].dropna().astype(str).mode()
+        defaults[column] = mode.iloc[0] if not mode.empty else ""
+    return defaults
+
+
+def prepare_dataset(file_path, test_size=0.25, random_state=42):
+    """Validate one CSV, split first, and return unfitted preprocessing metadata."""
+    dataframe = _read_and_validate_csv(file_path)
+    target_column = dataframe.columns[-1]
+    X = dataframe.iloc[:, :-1].copy().replace([np.inf, -np.inf], np.nan)
+    y, label_mapping = _encode_binary_target(dataframe[target_column])
+
+    class_counts = y.value_counts().sort_index()
+    if class_counts.min() < 3:
+        raise ValueError(
+            "Each class needs at least three rows for stratified training and testing."
+        )
+
+    test_rows = max(int(np.ceil(len(dataframe) * test_size)), 2)
+    max_test_rows = len(dataframe) - 4
+    if test_rows > max_test_rows:
+        raise ValueError(
+            "The dataset is too small to preserve both classes in training and testing."
+        )
+
+    try:
+        X_train, X_test, y_train, y_test = train_test_split(
+            X,
+            y,
+            test_size=test_rows,
+            random_state=random_state,
+            stratify=y,
+        )
+    except ValueError as error:
+        raise ValueError(f"Stratified train/test split failed: {error}") from error
+
+    if y_train.value_counts().min() < 2:
+        raise ValueError("The training split needs at least two rows per class for stacking.")
 
     numeric_columns = X.select_dtypes(include=np.number).columns.tolist()
     categorical_columns = [column for column in X.columns if column not in numeric_columns]
+    defaults = _training_defaults(X_train, numeric_columns, categorical_columns)
 
-    test_rows = max(int(np.ceil(df.shape[0] * test_size)), int(class_counts.size))
-    max_test_rows = df.shape[0] - int(class_counts.size)
-    if test_rows > max_test_rows:
-        raise ValueError("The dataset is too small to keep every class in both training and testing sets.")
-
-    X_train, X_test, y_train, y_test = train_test_split(
-        X,
-        y,
-        test_size=test_rows,
-        random_state=random_state,
-        stratify=y,
-    )
-
-    label_counts = class_counts.to_dict()
-    traffic_counts = _normal_anomaly_counts(y)
-
+    raw_counts = dataframe[target_column].astype(str).str.strip().value_counts()
     summary = {
-        "rows": int(df.shape[0]),
+        "rows": int(len(dataframe)),
         "features": int(X.shape[1]),
         "target_column": str(target_column),
-        "class_count": int(class_counts.size),
-        "label_counts": {str(label): int(count) for label, count in label_counts.items()},
-        "normal_count": traffic_counts["normal_count"],
-        "anomaly_count": traffic_counts["anomaly_count"],
-        "train_rows": int(X_train.shape[0]),
-        "test_rows": int(X_test.shape[0]),
+        "class_count": 2,
+        "label_counts": {str(label): int(count) for label, count in raw_counts.items()},
+        "normal_count": int((y == 0).sum()),
+        "anomaly_count": int((y == 1).sum()),
+        "train_rows": int(len(X_train)),
+        "test_rows": int(len(X_test)),
         "numeric_features": len(numeric_columns),
         "categorical_features": len(categorical_columns),
     }
@@ -157,5 +197,7 @@ def prepare_dataset(file_path, test_size=0.25, random_state=42):
         target_column=str(target_column),
         numeric_columns=numeric_columns,
         categorical_columns=categorical_columns,
+        feature_defaults=defaults,
+        label_mapping=label_mapping,
         summary=summary,
     )

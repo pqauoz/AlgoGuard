@@ -1,302 +1,202 @@
 # AlgoGuard
 
-AlgoGuard is a Flask-based research prototype for lightweight network anomaly detection. It is designed as a capstone-friendly simulation system for analyzing CSV network traffic datasets, training ensemble machine learning models, comparing their performance, and running a manual traffic-flow demo.
+AlgoGuard is a local Flask application for binary network traffic classification. One uploaded CSV creates one independent training run, evaluates exactly seven Scikit-learn approaches, recommends a winner using nine normalized metrics, and lets an administrator explicitly deploy that model for manual single-record prediction.
 
-The current version is a simulation/prototype. It analyzes uploaded datasets or manually entered traffic-flow values. It does not capture live packets, monitor a real network continuously, or block threats automatically.
+AlgoGuard does not capture live packets, monitor a network continuously, or block traffic. It is an operational research prototype for prepared CSV data and manual prediction.
 
----
+## Runtime Architecture
 
-## Features
+Every valid upload trains these exact candidates:
 
-- Dark cybersecurity dashboard
-- Admin login page with password hashing
-- Multiple admin accounts through an Admins page
-- CSV dataset upload
-- Automatic preprocessing
-- Categorical feature encoding
-- Numerical feature scaling
-- Train/test split
-- Ensemble model training and comparison
-- Manual single-flow simulation demo using the winning pretrained model
-- Performance metrics table
-- Normal traffic and anomaly counts
-- Best model identification
-- Joblib model saving
-- SQLite storage for admins, model records, predictions, alerts, reports, and system logs
-- Basic report export
+1. Random Forest
+2. Gradient Boosting
+3. AdaBoost
+4. K-Nearest Neighbors
+5. Naive Bayes
+6. Soft Voting Ensemble using all five individual estimators
+7. Stacking Ensemble using all five base estimators and Logistic Regression as the final estimator
 
----
+Each candidate receives its own unfitted estimator instances. All candidates use the same stratified train/test split. A Scikit-learn pipeline fits missing-value handling, scaling, and categorical encoding only on training data, then saves preprocessing and classification together in the Joblib artifact.
 
-## Models
+## Ranking
 
-The main dataset workflow trains and compares:
+Higher is better for Accuracy, Precision, Recall, F1-score, and ROC-AUC. Lower is better for False Positive Rate, process CPU time, peak process RAM increase, and complete artifact size.
 
-- Random Forest
-- Gradient Boosting
-- Voting Classifier
+AlgoGuard min-max normalizes all nine metrics across valid candidates. The overall score is their equal arithmetic average. Invalid or incomplete candidates are excluded. Ties are resolved by F1, Recall, ROC-AUC, FPR, RAM, model size, then model name.
 
-The simulation demo uses the winning pretrained `Stacking_Top3_LR` artifact from `artifacts/pretrained/Stacking_Top3_LR.zip`.
+## Main Workflow
 
----
+```text
+CSV upload
+  -> validation and independent training-run record
+  -> stratified split
+  -> seven leakage-safe pipelines
+  -> raw and normalized metrics
+  -> recommendation
+  -> administrator deployment
+  -> manual prediction using only the active artifact
+  -> prediction, optional alert, and system logs
+```
 
-## Metrics
-
-AlgoGuard displays:
-
-- Accuracy
-- Precision
-- Recall
-- F1-score
-- ROC-AUC
-- False Positive Rate
-- CPU Usage
-- RAM Usage
-- Model Size
-
----
+Training history, results, deployments, predictions, alerts, reports, admin accounts, and audit events are stored in SQLite. Uploaded files, reports, per-run artifacts, and the active artifact are runtime files excluded from Git.
 
 ## Project Structure
 
 ```text
 AlgoGuard/
 |-- app.py
+|-- migrate.py
 |-- requirements.txt
+|-- requirements-dev.txt
 |-- services/
 |   |-- database_service.py
-|   |-- preprocessing_service.py
-|   |-- training_service.py
+|   |-- deployment_service.py
 |   |-- evaluation_service.py
+|   |-- model_registry.py
+|   |-- preprocessing_service.py
+|   |-- resource_service.py
 |   |-- simulation_service.py
-|   `-- simulation/
-|       |-- feature_extractor.py
-|       |-- flow_builder.py
-|       |-- model_loader.py
-|       |-- predictor.py
-|       `-- preprocessor.py
+|   `-- training_service.py
 |-- templates/
-|   |-- admins.html
-|   |-- base.html
-|   |-- dashboard.html
-|   |-- login.html
-|   |-- upload.html
-|   |-- results.html
-|   `-- simulation.html
-|-- static/
-|   |-- css/
-|   `-- style.css
+|-- static/css/style.css
+|-- tests/
+|-- datasets/
+|   |-- algoguard_big.csv
+|   |-- algoguard_bigger.csv
+|   `-- algoguard_biggest.csv
+|-- database/
 |-- uploads/
 |-- saved_models/
 |-- reports/
-|-- database/
-|-- artifacts/
-|   `-- pretrained/
-|       |-- Stacking_Top3_LR.zip
-|       |-- scaler.pkl
-|       `-- encoded_columns.npy
 `-- research/
-    |-- dataset/
-    |-- models/
-    |-- notebooks/
-    `-- results/
 ```
 
----
+`research/` is an archived notebook workspace and is not imported by the Flask application.
 
-## Folder Guide
+## Installation on Windows PowerShell
 
-- `app.py`: main Flask application entrypoint.
-- `services/`: database, preprocessing, training, evaluation, and simulation logic.
-- `templates/`: pages used by the main Flask app.
-- `static/`: CSS assets for the web UI.
-- `artifacts/pretrained/`: winning model and preprocessing resources used by Simulation Mode.
-- `uploads/`: temporary uploaded CSV files.
-- `saved_models/`: Joblib models created by the training workflow.
-- `reports/`: CSV reports created after model comparison.
-- `database/`: local SQLite database file created when the app runs.
-- `research/`: optional notebooks, datasets, trained research models, and experiment result tables.
+Run all commands from the project root, the directory containing `app.py` and `requirements.txt`:
 
----
-
-## System Requirements
-
-- Python 3.8 or higher
-- Git
-
----
-
-## Installation
-
-Clone the repository:
-
-```bash
-git clone https://github.com/pqauoz/AlgoGuard.git
-cd AlgoGuard
+```powershell
+py -m venv venv
+.\venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 ```
 
-Create and activate a virtual environment:
+If PowerShell blocks activation, the environment can still be used directly:
 
-```bash
-python -m venv venv
-venv\Scripts\activate
+```powershell
+.\venv\Scripts\python.exe -m pip install -r requirements.txt
+.\venv\Scripts\python.exe app.py
 ```
 
-Install dependencies:
+## Database Migration
 
-```bash
-pip install -r requirements.txt
+Migrations are additive and preserve existing rows:
+
+```powershell
+python migrate.py
 ```
 
----
+The application also applies pending migrations at startup. Do not delete `database/algoguard.sqlite3` to upgrade an existing installation.
 
-## Running the Application
+## Run the Application
 
-Start the main Flask app from the project root:
-
-```bash
+```powershell
 python app.py
 ```
 
-Open:
+Open `http://127.0.0.1:5000`.
 
-```text
-http://localhost:5000
-```
-
-Default local login:
+Default local account on a new database:
 
 ```text
 Username: admin
 Password: admin123
 ```
 
-After logging in with an Administrator account, open the Admins page to create
-additional admin accounts.
+Change these environment values before first startup in a new environment:
 
-You can change the seeded local admin before the first run by setting:
-
-```bash
-set ALGOGUARD_ADMIN_USERNAME=your_username
-set ALGOGUARD_ADMIN_PASSWORD=your_password
-set ALGOGUARD_ADMIN_EMAIL=your_email@example.com
+```powershell
+$env:ALGOGUARD_ADMIN_USERNAME = "your_admin"
+$env:ALGOGUARD_ADMIN_PASSWORD = "a-strong-password"
+$env:ALGOGUARD_ADMIN_EMAIL = "admin@example.com"
+$env:ALGOGUARD_SECRET_KEY = "a-long-random-secret"
 python app.py
 ```
 
-If port 5000 is already in use:
+Multiple accounts are supported. Administrators can create Administrator or Analyst accounts from the Admins page. Password hashes and accounts persist in SQLite. Login state uses a signed Flask browser session and ends when the session cookie is cleared or the user logs out; it is not a permanent login token.
 
-```bash
-set ALGOGUARD_PORT=5001
-python app.py
+## CSV Contract
+
+- Use one `.csv` file per upload.
+- Include a header row.
+- Put all input features before the target.
+- Put the target label in the final column.
+- Use exactly two target classes representing Normal and Attack.
+- Include at least three rows per class; realistic evaluation requires substantially more.
+- Numeric and text features are accepted. Missing feature values are imputed.
+- Target values cannot be missing.
+
+Example:
+
+```csv
+dur,proto,service,state,spkts,dpkts,sbytes,dbytes,rate,sttl,dttl,sload,dload,sinpkt,dinpkt,label
+2.001348,tcp,-,FIN,16,14,862,802,14.490233,254,252,3233.820312,2977.99292,133.423196,146.368077,Normal
+1.665064,tcp,ftp-data,FIN,14,6,8928,320,11.410973,31,29,39835.10547,1282.833618,128.081847,332.462,Normal
+0.472012,tcp,http,FIN,10,8,834,354,36.016032,254,252,12728.48926,5254.103516,52.445778,60.35343,Attack
+0.320972,tcp,http,FIN,10,8,784,1256,52.964122,62,252,17596.55078,27391.79688,35.663556,38.518145,Attack
 ```
 
-Then open:
+Each row is one traffic-flow observation. Each feature column is one measured property. The final `label` is the known class used during supervised training. Adding a row labeled `Attack` does not force future inputs with those exact values to be attacks; it gives the models another labeled example from which to learn.
 
-```text
-http://localhost:5001
+## Included Manual Dataset Files
+
+Three ready-to-upload CSV files are included in `datasets/`:
+
+- `algoguard_big.csv`: 5,000 rows
+- `algoguard_bigger.csv`: 10,000 rows
+- `algoguard_biggest.csv`: 20,000 rows
+
+The files are nested, stratified, non-replacement samples of the labeled UNSW-NB15 training partition. Each file uses the same 15 input features: `dur`, `proto`, `service`, `state`, `spkts`, `dpkts`, `sbytes`, `dbytes`, `rate`, `sttl`, `dttl`, `sload`, `dload`, `sinpkt`, and `dinpkt`. The final binary `label` uses `Normal` and `Attack`. Other source columns, including the identifier and `attack_cat`, were removed to keep training practical and prevent identifier noise or direct target leakage.
+
+AlgoGuard does not generate or combine these files at runtime. Open Upload and select each CSV manually, one at a time. Each upload creates a separate run with its own seven model results and recommendation.
+
+Dataset source and attribution: [The UNSW-NB15 Dataset, UNSW Research](https://research.unsw.edu.au/projects/unsw-nb15-dataset). Academic work using these files should cite the dataset publications listed by UNSW.
+
+## Deploy and Predict
+
+Open a completed run, review all seven rows, then select **Deploy recommended model**. Training never replaces the active model automatically. Deployment saves the pipeline, model identity, source run, metric summary, and deployment timestamp to `saved_models/deployed_model.joblib` and records the active deployment in SQLite.
+
+The Prediction page builds its fields from the active artifact's saved feature schema. A prediction stores Normal or Attack, confidence, model name, timestamp, latency, and alert status. Attack creates an alert and audit events; Normal does not create an attack alert.
+
+## System Logs and Alerts
+
+Alert History contains anomalous predictions. System Logs contain authentication, upload, validation, preprocessing, training, ranking, deployment, prediction, reporting, and application events. Logs are newest first and support date, module, status, model, run ID, and text filters.
+
+## Quality Assurance
+
+Install QA tools and run all checks:
+
+```powershell
+python -m pip install -r requirements-dev.txt
+python -m ruff check app.py migrate.py services tests
+python -m pytest -q
 ```
-
----
-
-## Using AlgoGuard
-
-### Login
-
-Open the app and sign in with the seeded admin account. After login, the
-dashboard, upload workflow, simulation page, and results page become available.
-Login attempts, logout events, dataset training, and simulation predictions are
-recorded in the SQLite `system_log` table.
-
-Administrator accounts can create additional admin users from the Admins page.
-The new accounts are stored in SQLite with hashed passwords.
-
-### Dataset Mode
-
-1. Open the Upload page.
-2. Upload a CSV network traffic dataset.
-3. Make sure the final column is the target label.
-4. AlgoGuard preprocesses the data automatically.
-5. AlgoGuard trains and compares the three ensemble models.
-6. Results are displayed in a table and trained models are saved in `saved_models/`.
-7. Model metrics and report metadata are saved in the SQLite database.
-
-### Simulation Demo
-
-Open the Simulation page to manually enter one network traffic flow and test it against the winning pretrained `Stacking_Top3_LR` model.
-Each simulation stores a traffic record and prediction in SQLite. If the result
-is Attack, AlgoGuard also creates an alert record.
-
-Example normal-style input:
-
-| Feature | Value |
-| --- | --- |
-| Duration | 0.001 |
-| Rate | 15 |
-| Protocol | tcp |
-| State | CON |
-
-Example attack-style input:
-
-| Feature | Value |
-| --- | --- |
-| Duration | 0.000001 |
-| Rate | 5000 |
-| Protocol | tcp |
-| State | REQ |
-
----
-
-## Simulation Scope
-
-AlgoGuard is currently a research prototype and simulation. It demonstrates how machine learning can detect anomalous traffic patterns from prepared data.
-
-This version does not:
-
-- Capture live packets from a real network
-- Monitor routers, switches, or endpoints continuously
-- Block attacks
-- Send alerts to security tools
-- Replace a production IDS or IPS
-
-Future work could add live packet capture, scheduled monitoring, alerting, and deployment features for real network environments.
-
----
 
 ## Troubleshooting
 
-### ModuleNotFoundError
+`ModuleNotFoundError`: activate the same virtual environment where dependencies were installed, or invoke `.\venv\Scripts\python.exe` directly.
 
-Activate your virtual environment and reinstall dependencies:
+Invalid CSV: confirm the file is CSV, the target is last, exactly two target classes exist, and both classes have enough rows.
 
-```bash
-venv\Scripts\activate
-pip install -r requirements.txt
-```
+No active deployment: finish a valid training run and explicitly deploy its recommended model.
 
-### Invalid CSV
+Missing artifact: the database record and `saved_models/deployed_model.joblib` must agree. Redeploy a valid recommended model from Training Runs.
 
-The uploaded file must:
+Forgot local password: do not delete a database containing needed records. For a disposable new local installation only, recreate the database and seed credentials. Production-style password reset administration is outside this prototype's scope.
 
-- Be a `.csv` file
-- Contain at least one feature column
-- Use the last column as the target label
-- Contain at least two target classes
-- Have enough rows to split into training and testing sets
+## Scope
 
-### Model File Not Found
-
-The Simulation page uses the winning pretrained model artifact plus matching preprocessing resources. Confirm these files exist:
-
-- `artifacts/pretrained/Stacking_Top3_LR.zip`
-- `artifacts/pretrained/scaler.pkl`
-- `artifacts/pretrained/encoded_columns.npy`
-
-### Forgot Local Admin Password
-
-The default password is only seeded when the SQLite database is first created.
-For local development, stop the app, delete `database/algoguard.sqlite3`, set new
-admin environment variables if needed, and run `python app.py` again.
-
----
-
-## License
-
-This project is intended for academic and research purposes.
+AlgoGuard is intended for academic and controlled local use. Model quality depends on representative, correctly labeled data. It is not a replacement for a production IDS/IPS, live capture agent, or security operations platform.

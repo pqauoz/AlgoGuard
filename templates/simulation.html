@@ -1,112 +1,33 @@
 {% extends "base.html" %}
 
-{% block title %}Simulation Demo | AlgoGuard{% endblock %}
+{% block title %}Prediction | AlgoGuard{% endblock %}
 
 {% block content %}
-<section class="dashboard-header compact">
-    <div>
-        <p class="eyebrow">Manual Traffic Flow</p>
-        <h1>Simulation Demo</h1>
-        <p class="header-copy">Test a single network flow against the pretrained AlgoGuard model.</p>
-    </div>
-    <a class="btn btn-outline-light" href="{{ url_for('upload_dataset') }}">
-        <i class="bi bi-upload"></i>
-        Dataset Mode
-    </a>
-</section>
+<header class="page-heading"><div><p class="eyebrow">Operational Detection</p><h1>Single Traffic Prediction</h1></div>{% if schema.available %}<span class="deployment-chip"><i class="bi bi-broadcast-pin"></i><span><small>Active model</small><strong>{{ schema.deployment.model_name }} · Run #{{ schema.deployment.run_id }}</strong></span></span>{% endif %}</header>
 
-<section class="simulation-layout">
+{% if not schema.available %}
+<section class="panel unavailable-panel"><i class="bi bi-cloud-slash"></i><h2>No active deployment</h2><p>{{ schema.message }}</p><a class="btn btn-accent" href="{{ url_for('training_history') }}">Open training runs</a></section>
+{% else %}
+<div class="simulation-grid">
     <form class="panel simulation-form" method="post">
-        <div class="panel-heading">
-            <div>
-                <p class="eyebrow">Flow Input</p>
-                <h2>Network Features</h2>
-            </div>
+        <div class="panel-heading"><div><p class="eyebrow">Traffic Features</p><h2>{{ schema.fields|length }} Input Fields</h2></div><span class="status-badge success">Ready</span></div>
+        <div class="form-grid dynamic-fields">
+            {% for field in schema.fields %}
+            <div><label class="form-label" for="field_{{ loop.index }}">{{ field.label }}</label><input class="form-control" id="field_{{ loop.index }}" name="{{ field.name }}" type="{{ field.type }}" {% if field.type == 'number' %}step="any"{% endif %} value="{{ form_data.get(field.name, field.default) }}"></div>
+            {% endfor %}
         </div>
-
-        <div class="form-grid">
-            <div>
-                <label class="form-label" for="dur">Duration</label>
-                <input class="form-control" id="dur" name="dur" type="number" step="0.000001" value="{{ form_data.dur }}" required>
-            </div>
-            <div>
-                <label class="form-label" for="rate">Rate</label>
-                <input class="form-control" id="rate" name="rate" type="number" step="0.01" value="{{ form_data.rate }}" required>
-            </div>
-            <div>
-                <label class="form-label" for="spkts">Source Packets</label>
-                <input class="form-control" id="spkts" name="spkts" type="number" value="{{ form_data.spkts }}" required>
-            </div>
-            <div>
-                <label class="form-label" for="dpkts">Destination Packets</label>
-                <input class="form-control" id="dpkts" name="dpkts" type="number" value="{{ form_data.dpkts }}" required>
-            </div>
-            <div>
-                <label class="form-label" for="sbytes">Source Bytes</label>
-                <input class="form-control" id="sbytes" name="sbytes" type="number" value="{{ form_data.sbytes }}" required>
-            </div>
-            <div>
-                <label class="form-label" for="dbytes">Destination Bytes</label>
-                <input class="form-control" id="dbytes" name="dbytes" type="number" value="{{ form_data.dbytes }}" required>
-            </div>
-            <div>
-                <label class="form-label" for="sttl">Source TTL</label>
-                <input class="form-control" id="sttl" name="sttl" type="number" value="{{ form_data.sttl }}" required>
-            </div>
-            <div>
-                <label class="form-label" for="dttl">Destination TTL</label>
-                <input class="form-control" id="dttl" name="dttl" type="number" value="{{ form_data.dttl }}" required>
-            </div>
-            <div>
-                <label class="form-label" for="proto">Protocol</label>
-                <select class="form-select" id="proto" name="proto">
-                    {% for proto in ["tcp", "udp", "icmp"] %}
-                        <option value="{{ proto }}" {% if form_data.proto == proto %}selected{% endif %}>{{ proto }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div>
-                <label class="form-label" for="state">State</label>
-                <select class="form-select" id="state" name="state">
-                    {% for state in ["CON", "FIN", "INT", "REQ"] %}
-                        <option value="{{ state }}" {% if form_data.state == state %}selected{% endif %}>{{ state }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-        </div>
-
-        <button class="btn btn-accent w-100" type="submit">
-            <i class="bi bi-radar"></i>
-            Run Simulation
-        </button>
+        <button class="btn btn-accent w-100" type="submit"><i class="bi bi-play-fill"></i> Run prediction</button>
     </form>
 
-    <aside class="panel simulation-result-panel">
-        <div class="panel-heading">
-            <div>
-                <p class="eyebrow">Prediction</p>
-                <h2>Detection Result</h2>
-            </div>
-        </div>
-
+    <aside class="panel prediction-panel {% if result %}prediction-{{ result.prediction|lower }}{% endif %}">
         {% if result %}
-            <div class="result-card {% if result.prediction == 'Attack' %}attack{% else %}normal{% endif %}">
-                <span>{{ result.prediction }}</span>
-                <strong>{{ result.confidence }}%</strong>
-                <small>Model confidence</small>
-            </div>
-            <dl class="detail-list simulation-detail-list">
-                {% for key, value in result.flow_data.items() %}
-                    <div><dt>{{ key }}</dt><dd>{{ value }}</dd></div>
-                {% endfor %}
-            </dl>
+        <div class="prediction-symbol"><i class="bi {% if result.prediction == 'Attack' %}bi-exclamation-triangle-fill{% else %}bi-shield-check{% endif %}"></i></div>
+        <small>Classification</small><h2>{{ result.prediction }}</h2><strong class="confidence">{{ result.confidence }}%</strong><span>confidence</span>
+        <dl class="compact-list mt-4"><div><dt>Model</dt><dd>{{ result.deployed_model_name }}</dd></div><div><dt>Latency</dt><dd>{{ result.latency_ms }} ms</dd></div><div><dt>Prediction</dt><dd>#{{ result.prediction_id }}</dd></div><div><dt>Alert</dt><dd>{{ 'Created #' ~ result.alert_id if result.alert_created else 'Not created' }}</dd></div></dl>
         {% else %}
-            <div class="empty-state simulation-empty">
-                <i class="bi bi-shield-check"></i>
-                <h2>Ready</h2>
-                <p>Enter a flow and run the pretrained simulation model.</p>
-            </div>
+        <div class="empty-state"><i class="bi bi-activity"></i><h2>Awaiting input</h2><p>Prediction output will appear here.</p></div>
         {% endif %}
     </aside>
-</section>
+</div>
+{% endif %}
 {% endblock %}

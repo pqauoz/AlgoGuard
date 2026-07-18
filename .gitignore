@@ -2,15 +2,21 @@
 # Jupyter checkpoints
 .ipynb_checkpoints/
 
-# LARGE DATA FILES
-research/dataset/processed/X_train.npy
-research/dataset/processed/X_test.npy
-research/dataset/processed/y_train.npy
-research/dataset/processed/y_test.npy
+# Generated research outputs
+research/dataset/processed/*
+!research/dataset/processed/.gitkeep
+research/models/*
+!research/models/.gitkeep
 
 # Backup files
 *.bak
 *.tmp
+
+# Test and lint output
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
 # Runtime artifacts
 uploads/*
@@ -37,6 +43,11 @@ venv/
 env/
 ENV/
 
+# Local environment variables and secrets
+.env
+.env.*
+!.env.example
+
 # IDE files
 .vscode/
 .idea/
@@ -46,13 +57,3 @@ ENV/
 # OS files
 .DS_Store
 Thumbs.db
-
-# Ignore all large model files
-research/models/*.pkl
-artifacts/pretrained/Stacking_*.pkl
-
-
-
-# Keep smaller files
-!research/dataset/processed/scaler.pkl
-!research/dataset/processed/encoded_columns.npy
