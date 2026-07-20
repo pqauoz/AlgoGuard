@@ -29,6 +29,13 @@
             <span class="status-badge success">Protected</span>
         </div>
 
+        {% if request.args.get("logged_out") == "1" %}
+        <div class="logout-complete-notice" role="status">
+            <i class="bi bi-check-circle" aria-hidden="true"></i>
+            <span><strong>Session ended</strong>You have been securely logged out.</span>
+        </div>
+        {% endif %}
+
         <div>
             <label class="form-label" for="username">Username</label>
             <input class="form-control" id="username" name="username" type="text" value="{{ username or '' }}" required autofocus>

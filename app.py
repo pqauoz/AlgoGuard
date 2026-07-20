@@ -276,6 +276,18 @@ def require_admin_login():
     )
 
 
+@app.after_request
+def prevent_dynamic_page_caching(response):
+    """Keep authenticated views out of browser history and intermediary caches."""
+    if request.endpoint != "static":
+        response.headers["Cache-Control"] = (
+            "no-store, no-cache, must-revalidate, max-age=0, private"
+        )
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
+
 @app.errorhandler(413)
 def upload_too_large(_error):
     if current_admin_id():
@@ -356,8 +368,7 @@ def logout():
             message=f"Admin {session.get('admin_username')} logged out.",
         )
     session.clear()
-    flash("You have been logged out.", "info")
-    return redirect(url_for("login"))
+    return redirect(url_for("login", logged_out="1"))
 
 
 @app.route("/admins", methods=["GET", "POST"])
