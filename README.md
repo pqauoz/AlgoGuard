@@ -1,6 +1,6 @@
 # AlgoGuard
 
-AlgoGuard is a local Flask application for binary network traffic classification. One uploaded CSV creates one independent training run, evaluates exactly seven Scikit-learn approaches, recommends a winner using nine normalized metrics, and lets an administrator explicitly deploy that model for manual single-record prediction.
+AlgoGuard is a local Flask application for binary network traffic classification. One uploaded CSV creates one independent training run, evaluates exactly six Scikit-learn approaches, recommends a winner using nine normalized metrics, and lets an administrator explicitly deploy that model for manual single-record prediction.
 
 AlgoGuard does not capture live packets, monitor a network continuously, or block traffic. It is an operational research prototype for prepared CSV data and manual prediction.
 
@@ -13,8 +13,7 @@ Every valid upload trains these exact candidates:
 3. AdaBoost
 4. K-Nearest Neighbors
 5. Naive Bayes
-6. Soft Voting Ensemble using all five individual estimators
-7. Stacking Ensemble using all five base estimators and Logistic Regression as the final estimator
+6. Stacking Ensemble using all five base estimators and Logistic Regression as the final estimator
 
 Each candidate receives its own unfitted estimator instances. All candidates use the same stratified train/test split. A Scikit-learn pipeline fits missing-value handling, scaling, and categorical encoding only on training data, then saves preprocessing and classification together in the Joblib artifact.
 
@@ -30,7 +29,7 @@ AlgoGuard min-max normalizes all nine metrics across valid candidates. The overa
 CSV upload
   -> validation and independent training-run record
   -> stratified split
-  -> seven leakage-safe pipelines
+  -> six leakage-safe pipelines
   -> raw and normalized metrics
   -> recommendation
   -> administrator deployment
@@ -161,13 +160,13 @@ Three ready-to-upload CSV files are included in `datasets/`:
 
 The files are nested, stratified, non-replacement samples of the labeled UNSW-NB15 training partition. Each file uses the same 15 input features: `dur`, `proto`, `service`, `state`, `spkts`, `dpkts`, `sbytes`, `dbytes`, `rate`, `sttl`, `dttl`, `sload`, `dload`, `sinpkt`, and `dinpkt`. The final binary `label` uses `Normal` and `Attack`. Other source columns, including the identifier and `attack_cat`, were removed to keep training practical and prevent identifier noise or direct target leakage.
 
-AlgoGuard does not generate or combine these files at runtime. Open Upload and select each CSV manually, one at a time. Each upload creates a separate run with its own seven model results and recommendation.
+AlgoGuard does not generate or combine these files at runtime. Open Upload and select each CSV manually, one at a time. Each upload creates a separate run with its own six model results and recommendation.
 
 Dataset source and attribution: [The UNSW-NB15 Dataset, UNSW Research](https://research.unsw.edu.au/projects/unsw-nb15-dataset). Academic work using these files should cite the dataset publications listed by UNSW.
 
 ## Deploy and Predict
 
-Open a completed run, review all seven rows, then select **Deploy recommended model**. Training never replaces the active model automatically. Deployment saves the pipeline, model identity, source run, metric summary, and deployment timestamp to `saved_models/deployed_model.joblib` and records the active deployment in SQLite.
+Open a completed run, review all six rows, then select **Deploy recommended model**. Training never replaces the active model automatically. Deployment saves the pipeline, model identity, source run, metric summary, and deployment timestamp to `saved_models/deployed_model.joblib` and records the active deployment in SQLite.
 
 The Prediction page builds its fields from the active artifact's saved feature schema. A prediction stores Normal or Attack, confidence, model name, timestamp, latency, and alert status. Attack creates an alert and audit events; Normal does not create an attack alert.
 

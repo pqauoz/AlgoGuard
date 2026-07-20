@@ -39,7 +39,7 @@ from services.database_service import (
     utc_now,
 )
 from services.deployment_service import DeploymentError, deploy_model
-from services.model_registry import MODEL_IDS
+from services.model_registry import MODEL_IDS, MODEL_NAMES
 from services.preprocessing_service import prepare_dataset
 from services.simulation_service import (
     SimulationServiceError,
@@ -818,6 +818,7 @@ def training_results(run_id):
         training_run=training_run,
         model_results=list_model_results(run_id),
         active_deployment=get_active_deployment(),
+        supported_model_names=MODEL_NAMES,
     )
 
 

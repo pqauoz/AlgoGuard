@@ -79,7 +79,7 @@ def train_and_compare_models(
     event_logger=None,
     progress_callback=None,
 ):
-    """Train exactly seven independent candidates and isolate model failures."""
+    """Train exactly six independent candidates and isolate model failures."""
     run_folder = os.path.join(saved_model_folder, f"run_{run_id}")
     os.makedirs(run_folder, exist_ok=True)
 
@@ -103,7 +103,7 @@ def train_and_compare_models(
             model_name,
             "started",
         )
-        action_prefix = model_id if model_id in {"soft_voting", "stacking"} else "individual_model"
+        action_prefix = "stacking" if model_id == "stacking" else "individual_model"
         _emit(
             event_logger,
             f"{action_prefix}_training_started",

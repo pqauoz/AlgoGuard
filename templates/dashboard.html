@@ -99,7 +99,7 @@
             <div class="empty-state">
                 <i class="bi bi-database-lock"></i>
                 <h2>No completed analysis yet</h2>
-                <p>Upload a binary Normal/Attack CSV dataset to train and compare the seven candidate models.</p>
+                <p>Upload a binary Normal/Attack CSV dataset to train and compare the six candidate models.</p>
             </div>
             {% endif %}
         </div>
@@ -121,7 +121,7 @@
             <div>
                 <p class="eyebrow">Traffic Classifier</p>
                 <h2>{% if active_deployment %}{{ active_deployment.model_name }}{% else %}Ensemble IDS Pipeline{% endif %}</h2>
-                <p>{% if active_deployment %}Active deployment from run #{{ active_deployment.run_id }}. Manual traffic prediction is ready.{% else %}CSV validation, preprocessing, seven-model training, evaluation, and Joblib export are handled in one workflow.{% endif %}</p>
+                <p>{% if active_deployment %}Active deployment from run #{{ active_deployment.run_id }}. Manual traffic prediction is ready.{% else %}CSV validation, preprocessing, six-model training, evaluation, and Joblib export are handled in one workflow.{% endif %}</p>
                 {% if active_deployment %}
                 <a class="btn btn-outline-light mt-2" href="{{ url_for('simulation_demo') }}"><i class="bi bi-activity"></i> Open Prediction</a>
                 {% endif %}

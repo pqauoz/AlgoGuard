@@ -7,7 +7,6 @@ from sklearn.ensemble import (
     GradientBoostingClassifier,
     RandomForestClassifier,
     StackingClassifier,
-    VotingClassifier,
 )
 from sklearn.linear_model import LogisticRegression
 from sklearn.naive_bayes import GaussianNB
@@ -30,7 +29,6 @@ MODEL_IDS: OrderedDict[str, str] = OrderedDict(
         ("adaboost", "AdaBoost"),
         ("knn", "K-Nearest Neighbors"),
         ("naive_bayes", "Naive Bayes"),
-        ("soft_voting", "Soft Voting Ensemble"),
         ("stacking", "Stacking Ensemble"),
     ]
 )
@@ -68,7 +66,7 @@ def build_model_candidates(
     stacking_cv: int = 5,
     n_neighbors: int = 5,
 ) -> OrderedDict[str, ModelSpecification]:
-    """Build exactly five standalone and two ensemble candidates."""
+    """Build exactly five standalone candidates and one stacking ensemble."""
     candidates: OrderedDict[str, ModelSpecification] = OrderedDict()
 
     for model_id, estimator in build_individual_estimators(n_neighbors=n_neighbors).items():
@@ -77,15 +75,6 @@ def build_model_candidates(
             "model_type": "individual",
             "estimator": estimator,
         }
-
-    candidates["soft_voting"] = {
-        "model_name": MODEL_IDS["soft_voting"],
-        "model_type": "ensemble",
-        "estimator": VotingClassifier(
-            estimators=_ensemble_estimators(n_neighbors=n_neighbors),
-            voting="soft",
-        ),
-    }
 
     candidates["stacking"] = {
         "model_name": MODEL_IDS["stacking"],

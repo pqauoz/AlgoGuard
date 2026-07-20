@@ -7,7 +7,7 @@
     <div>
         <p class="eyebrow">Dataset Intake</p>
         <h1>Upload Network Traffic</h1>
-        <p class="header-copy">Each CSV is validated and preprocessed automatically before seven-model training.</p>
+        <p class="header-copy">Each CSV is validated and preprocessed automatically before six-model training.</p>
     </div>
     <a class="btn btn-outline-light" href="{{ url_for('training_history') }}">
         <i class="bi bi-clock-history"></i>
@@ -57,7 +57,7 @@
                 <p class="eyebrow">Training Set</p>
                 <h2>Required CSV Format</h2>
             </div>
-            <span class="status-pill">7 models</span>
+            <span class="status-pill">{{ models|length }} models</span>
         </div>
         <div class="schema-list">
             <div>

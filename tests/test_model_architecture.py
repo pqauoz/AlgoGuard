@@ -1,8 +1,8 @@
 from sklearn.base import clone
-from sklearn.ensemble import StackingClassifier, VotingClassifier
+from sklearn.ensemble import StackingClassifier
 from sklearn.linear_model import LogisticRegression
 
-from services.model_registry import MODEL_IDS, build_model_candidates
+from services.model_registry import MODEL_IDS, build_model_candidates, safe_model_filename
 
 
 EXPECTED_NAMES = (
@@ -11,13 +11,20 @@ EXPECTED_NAMES = (
     "AdaBoost",
     "K-Nearest Neighbors",
     "Naive Bayes",
-    "Soft Voting Ensemble",
     "Stacking Ensemble",
 )
 
 
-def test_registry_contains_exactly_seven_models():
+def test_registry_contains_exactly_six_models():
     assert tuple(MODEL_IDS.values()) == EXPECTED_NAMES
+    assert "Soft Voting Ensemble" not in MODEL_IDS.values()
+
+
+def test_removed_soft_voting_identifier_cannot_create_an_artifact_name():
+    import pytest
+
+    with pytest.raises(ValueError, match="Unknown AlgoGuard model identifier"):
+        safe_model_filename("soft_voting")
 
 
 def test_all_registered_estimators_are_sklearn_cloneable():
@@ -25,16 +32,6 @@ def test_all_registered_estimators_are_sklearn_cloneable():
 
     for specification in candidates.values():
         assert clone(specification["estimator"]) is not specification["estimator"]
-
-
-def test_soft_voting_uses_all_five_fresh_estimators():
-    candidates = build_model_candidates(stacking_cv=3)
-    voting = candidates["soft_voting"]["estimator"]
-    assert isinstance(voting, VotingClassifier)
-    assert voting.voting == "soft"
-    assert [name for name, _ in voting.estimators] == list(MODEL_IDS.keys())[:5]
-    for name, estimator in voting.estimators:
-        assert estimator is not candidates[name]["estimator"]
 
 
 def test_stacking_uses_five_models_and_logistic_regression():
@@ -53,12 +50,12 @@ def test_all_five_individual_models_train_successfully(trained_bundle):
     assert all(result["status"] == "completed" for result in individual_results)
 
 
-def test_successful_run_produces_seven_results(trained_bundle):
+def test_successful_run_produces_six_results(trained_bundle):
     from services.database_service import list_model_results
 
     results = trained_bundle["result"]["model_results"]
-    assert len(results) == 7
-    assert len(list_model_results(trained_bundle["run_id"])) == 7
+    assert len(results) == 6
+    assert len(list_model_results(trained_bundle["run_id"])) == 6
     assert all(result["status"] == "completed" for result in results)
 
 
@@ -67,7 +64,7 @@ def test_training_reports_start_and_completion_for_each_model(trained_bundle):
     started = [event for event in events if event[3] == "started"]
     completed = [event for event in events if event[3] == "completed"]
 
-    assert len(started) == 7
-    assert len(completed) == 7
-    assert [event[0] for event in completed] == list(range(1, 8))
-    assert all(event[1] == 7 for event in events)
+    assert len(started) == 6
+    assert len(completed) == 6
+    assert [event[0] for event in completed] == list(range(1, 7))
+    assert all(event[1] == 6 for event in events)

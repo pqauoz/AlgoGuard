@@ -115,8 +115,8 @@ def test_each_csv_upload_creates_one_independent_run(
     assert previous["filename"] == "first.csv"
     assert newest["row_count"] == len(binary_dataframe.iloc[32:])
     assert previous["row_count"] == len(binary_dataframe.iloc[:64])
-    assert newest["model_result_count"] == 7
-    assert previous["model_result_count"] == 7
+    assert newest["model_result_count"] == 6
+    assert previous["model_result_count"] == 6
 
 
 def test_one_class_upload_fails_safely(authenticated_client, binary_dataframe):
@@ -144,7 +144,7 @@ def test_selected_recommended_winner_can_be_deployed(
 
 @pytest.mark.parametrize(
     "model_name",
-    ["Random Forest", "Soft Voting Ensemble", "Stacking Ensemble"],
+    ["Random Forest", "Stacking Ensemble"],
 )
 def test_deployed_model_types_can_predict(trained_bundle, model_name):
     model_id = set_recommended_model(trained_bundle["run_id"], model_name)

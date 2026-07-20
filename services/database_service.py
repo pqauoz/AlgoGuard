@@ -624,7 +624,7 @@ def list_training_runs(page=1, per_page=20):
     }
 
 
-def insert_model_result(run_id, model_result, version="seven-model-v1"):
+def insert_model_result(run_id, model_result, version="six-model-v2"):
     """Persist raw metrics, normalized metrics, score, and artifact metadata."""
     normalized = model_result.get("normalized_metrics") or {}
     fpr = _safe_float(model_result.get("false_positive_rate"))
@@ -683,7 +683,7 @@ def insert_model_result(run_id, model_result, version="seven-model-v1"):
 
 
 def save_training_results(run_id, model_results, best_model):
-    """Save all seven result rows and connect the recommended model to the run."""
+    """Save every result row and connect the recommended model to the run."""
     model_ids = {}
     for result in model_results:
         result["is_recommended"] = bool(

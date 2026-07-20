@@ -57,6 +57,8 @@
     {% if recommended %}
         {% if active_deployment and active_deployment.model_id == recommended.model_id %}
         <span class="status-pill active"><i class="bi bi-broadcast-pin"></i> Active Deployment</span>
+        {% elif recommended.model_name not in supported_model_names %}
+        <span class="status-pill"><i class="bi bi-cloud-slash"></i> Legacy Result</span>
         {% else %}
         <form method="post" action="{{ url_for('deploy_training_model', run_id=training_run.run_id, model_id=recommended.model_id) }}" onsubmit="return confirm('Deploy {{ recommended.model_name }} as the active prediction model?');">
             <button class="btn btn-accent" type="submit"><i class="bi bi-cloud-arrow-up"></i> Deploy Best Model</button>
@@ -70,9 +72,9 @@
     <div class="panel-heading">
         <div>
             <p class="eyebrow">Comparison Table</p>
-            <h2>Seven-Model Metrics</h2>
+            <h2>Model Metrics</h2>
         </div>
-        <span class="status-pill active">{{ model_results|selectattr('evaluation_status', 'equalto', 'completed')|list|length }}/7 valid</span>
+        <span class="status-pill active">{{ model_results|selectattr('evaluation_status', 'equalto', 'completed')|list|length }}/{{ model_results|length }} valid</span>
     </div>
 
     {% if model_results %}

@@ -244,7 +244,8 @@ After upload, AlgoGuard:
 4. Encodes text columns like proto and state.
 5. Scales numerical values.
 6. Splits the data into training and testing sets.
-7. Trains Random Forest, Gradient Boosting, and Voting Classifier.
+7. Trains Random Forest, Gradient Boosting, AdaBoost, K-Nearest Neighbors,
+   Naive Bayes, and the Stacking Ensemble.
 8. Tests each model.
 9. Shows the metrics.
 10. Saves model records and report metadata in SQLite.
@@ -613,10 +614,9 @@ The best model is shown on the Dashboard and Results page.
 
 After uploading and training, the app can generate:
 
-saved_models/random_forest.joblib
-saved_models/gradient_boosting.joblib
-saved_models/voting_classifier.joblib
-reports/model_report_YYYYMMDDHHMMSS.csv
+saved_models/run_<run_id>/*.joblib
+saved_models/deployed_model.joblib
+reports/training_run_<run_id>_model_results.csv
 database/algoguard.sqlite3
 
 These generated files are ignored by Git so the repository stays clean.

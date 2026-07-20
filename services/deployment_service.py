@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import joblib
 
 from services.database_service import get_active_deployment, get_model_result, record_deployment
+from services.model_registry import MODEL_NAMES
 
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -23,6 +24,10 @@ def deploy_model(model_id, admin_id):
     model = get_model_result(model_id)
     if not model:
         raise DeploymentError("The selected model result does not exist.")
+    if model.get("model_name") not in MODEL_NAMES:
+        raise DeploymentError(
+            "This legacy model is no longer supported. Train a new run before deploying."
+        )
     if model.get("evaluation_status") != "completed":
         raise DeploymentError("Only a completed model evaluation can be deployed.")
     if not model.get("is_recommended"):
@@ -102,6 +107,10 @@ def load_active_artifact():
     deployment = get_active_deployment()
     if not deployment:
         raise DeploymentError("No model has been deployed. Deploy a recommended model first.")
+    if deployment.get("model_name") not in MODEL_NAMES:
+        raise DeploymentError(
+            "The active deployment uses a removed model. Deploy a model from a new run."
+        )
 
     artifact_path = deployment.get("artifact_path") or ACTIVE_MODEL_PATH
     if not os.path.exists(artifact_path):

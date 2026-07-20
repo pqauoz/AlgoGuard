@@ -26,5 +26,7 @@ def test_legacy_three_model_and_old_stacking_references_are_absent():
         "only three models",
         "three-model comparison",
         "services.simulation.",
+        "soft_voting",
+        "soft voting",
     )
     assert all(value not in text for value in forbidden)
