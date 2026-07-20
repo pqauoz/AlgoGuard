@@ -1,33 +1,91 @@
 {% extends "base.html" %}
 
-{% block title %}Prediction | AlgoGuard{% endblock %}
+{% block title %}Prediction Demo | AlgoGuard{% endblock %}
 
 {% block content %}
-<header class="page-heading"><div><p class="eyebrow">Operational Detection</p><h1>Single Traffic Prediction</h1></div>{% if schema.available %}<span class="deployment-chip"><i class="bi bi-broadcast-pin"></i><span><small>Active model</small><strong>{{ schema.deployment.model_name }} · Run #{{ schema.deployment.run_id }}</strong></span></span>{% endif %}</header>
+<section class="dashboard-header compact">
+    <div>
+        <p class="eyebrow">Manual Traffic Flow</p>
+        <h1>Prediction Demo</h1>
+        <p class="header-copy">Classify one network flow with the active deployed AlgoGuard model.</p>
+    </div>
+    <a class="btn btn-outline-light" href="{{ url_for('upload_dataset') }}">
+        <i class="bi bi-upload"></i>
+        Dataset Mode
+    </a>
+</section>
 
 {% if not schema.available %}
-<section class="panel unavailable-panel"><i class="bi bi-cloud-slash"></i><h2>No active deployment</h2><p>{{ schema.message }}</p><a class="btn btn-accent" href="{{ url_for('training_history') }}">Open training runs</a></section>
+<section class="panel unavailable-panel">
+    <i class="bi bi-cloud-slash"></i>
+    <h2>No active deployment</h2>
+    <p>{{ schema.message }}</p>
+    <a class="btn btn-accent" href="{{ url_for('training_history') }}">Open Training Runs</a>
+</section>
 {% else %}
-<div class="simulation-grid">
+<section class="simulation-layout">
     <form class="panel simulation-form" method="post">
-        <div class="panel-heading"><div><p class="eyebrow">Traffic Features</p><h2>{{ schema.fields|length }} Input Fields</h2></div><span class="status-badge success">Ready</span></div>
-        <div class="form-grid dynamic-fields">
+        <div class="panel-heading">
+            <div>
+                <p class="eyebrow">Flow Input</p>
+                <h2>Network Features</h2>
+            </div>
+            <span class="status-pill active">{{ schema.fields|length }} fields</span>
+        </div>
+
+        <div class="form-grid">
             {% for field in schema.fields %}
-            <div><label class="form-label" for="field_{{ loop.index }}">{{ field.label }}</label><input class="form-control" id="field_{{ loop.index }}" name="{{ field.name }}" type="{{ field.type }}" {% if field.type == 'number' %}step="any"{% endif %} value="{{ form_data.get(field.name, field.default) }}"></div>
+            <div>
+                <label class="form-label" for="field_{{ loop.index }}">{{ field.label }}</label>
+                <input
+                    class="form-control"
+                    id="field_{{ loop.index }}"
+                    name="{{ field.name }}"
+                    type="{{ field.type }}"
+                    {% if field.type == 'number' %}step="any"{% endif %}
+                    value="{{ form_data.get(field.name, field.default) }}"
+                    required
+                >
+            </div>
             {% endfor %}
         </div>
-        <button class="btn btn-accent w-100" type="submit"><i class="bi bi-play-fill"></i> Run prediction</button>
+
+        <button class="btn btn-accent w-100" type="submit">
+            <i class="bi bi-radar"></i>
+            Run Prediction
+        </button>
     </form>
 
-    <aside class="panel prediction-panel {% if result %}prediction-{{ result.prediction|lower }}{% endif %}">
+    <aside class="panel simulation-result-panel">
+        <div class="panel-heading">
+            <div>
+                <p class="eyebrow">Prediction</p>
+                <h2>Detection Result</h2>
+            </div>
+            <span class="status-pill active">{{ schema.deployment.model_name }}</span>
+        </div>
+
         {% if result %}
-        <div class="prediction-symbol"><i class="bi {% if result.prediction == 'Attack' %}bi-exclamation-triangle-fill{% else %}bi-shield-check{% endif %}"></i></div>
-        <small>Classification</small><h2>{{ result.prediction }}</h2><strong class="confidence">{{ result.confidence }}%</strong><span>confidence</span>
-        <dl class="compact-list mt-4"><div><dt>Model</dt><dd>{{ result.deployed_model_name }}</dd></div><div><dt>Latency</dt><dd>{{ result.latency_ms }} ms</dd></div><div><dt>Prediction</dt><dd>#{{ result.prediction_id }}</dd></div><div><dt>Alert</dt><dd>{{ 'Created #' ~ result.alert_id if result.alert_created else 'Not created' }}</dd></div></dl>
+            <div class="result-card {% if result.prediction == 'Attack' %}attack{% else %}normal{% endif %}">
+                <span>{{ result.prediction }}</span>
+                <strong>{{ result.confidence }}%</strong>
+                <small>Model confidence</small>
+            </div>
+            <dl class="detail-list simulation-detail-list">
+                <div><dt>Model</dt><dd>{{ result.deployed_model_name }}</dd></div>
+                <div><dt>Source run</dt><dd>#{{ result.source_run_id }}</dd></div>
+                <div><dt>Latency</dt><dd>{{ result.latency_ms }} ms</dd></div>
+                <div><dt>Prediction</dt><dd>#{{ result.prediction_id }}</dd></div>
+                <div><dt>Alert</dt><dd>{{ 'Created #' ~ result.alert_id if result.alert_created else 'Not created' }}</dd></div>
+            </dl>
         {% else %}
-        <div class="empty-state"><i class="bi bi-activity"></i><h2>Awaiting input</h2><p>Prediction output will appear here.</p></div>
+            <div class="empty-state simulation-empty">
+                <i class="bi bi-shield-check"></i>
+                <h2>Ready</h2>
+                <p>Enter one traffic flow and run the active model.</p>
+            </div>
         {% endif %}
     </aside>
-</div>
+</section>
 {% endif %}
 {% endblock %}

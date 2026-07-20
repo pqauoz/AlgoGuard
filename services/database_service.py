@@ -69,6 +69,12 @@ TRAINING_RUN_COUNT_COLUMNS = {
     "anomaly_count": "INTEGER",
 }
 
+LEGACY_METRIC_COLUMNS = {
+    "cpu_usage": "REAL",
+    "training_time": "REAL",
+    "normalized_cpu": "REAL",
+}
+
 
 def utc_now():
     """Return a sortable UTC timestamp for SQLite records."""
@@ -269,6 +275,7 @@ def initialize_database():
         )
         _apply_training_workflow_migration(connection)
         _apply_traffic_count_migration(connection)
+        _apply_legacy_metric_compatibility_migration(connection)
         _ensure_indexes(connection)
 
     seed_default_admin()
@@ -318,6 +325,45 @@ def _apply_traffic_count_migration(connection):
     connection.execute(
         "INSERT INTO schema_migration (version, name, applied_at) VALUES (?, ?, ?)",
         (2, "training_run_traffic_counts", utc_now()),
+    )
+
+
+def _apply_legacy_metric_compatibility_migration(connection):
+    """Let the ca4 metric contract read databases created by newer revisions."""
+    migration = connection.execute(
+        "SELECT version FROM schema_migration WHERE version = 4"
+    ).fetchone()
+    if migration:
+        return
+
+    existing = _column_names(connection, "detection_model")
+    _add_missing_columns(connection, "detection_model", LEGACY_METRIC_COLUMNS)
+
+    if "cpu_time_seconds" in existing:
+        connection.execute(
+            """
+            UPDATE detection_model
+            SET cpu_usage = COALESCE(cpu_usage, cpu_time_seconds)
+            """
+        )
+    if "processing_time_seconds" in existing:
+        connection.execute(
+            """
+            UPDATE detection_model
+            SET training_time = COALESCE(training_time, processing_time_seconds)
+            """
+        )
+    if "normalized_cpu_time" in existing:
+        connection.execute(
+            """
+            UPDATE detection_model
+            SET normalized_cpu = COALESCE(normalized_cpu, normalized_cpu_time)
+            """
+        )
+
+    connection.execute(
+        "INSERT INTO schema_migration (version, name, applied_at) VALUES (?, ?, ?)",
+        (4, "legacy_metric_column_compatibility", utc_now()),
     )
 
 

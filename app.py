@@ -401,9 +401,11 @@ def manage_admins():
 @app.route("/")
 def dashboard():
     logs = list_system_logs(page=1, per_page=5)
+    latest_run = get_latest_training_run()
     return render_template(
         "dashboard.html",
-        latest_run=get_latest_training_run(),
+        latest_run=latest_run,
+        model_results=list_model_results(latest_run["run_id"]) if latest_run else [],
         active_deployment=get_active_deployment(),
         latest_prediction=get_latest_prediction(),
         latest_alerts=list_alerts(limit=5),
