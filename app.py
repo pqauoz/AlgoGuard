@@ -1,8 +1,10 @@
 import os
 import sqlite3
+import threading
+import time
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pandas as pd
 from flask import Flask, flash, jsonify, redirect, render_template, request, session, url_for
@@ -53,6 +55,9 @@ SAVED_MODEL_FOLDER = os.path.join(BASE_DIR, "saved_models")
 REPORT_FOLDER = os.path.join(BASE_DIR, "reports")
 ALLOWED_EXTENSIONS = {"csv"}
 ADMIN_ROLES = ("Administrator", "Analyst")
+TRAINING_PROGRESS_TTL_SECONDS = 60 * 60
+TRAINING_PROGRESS = {}
+TRAINING_PROGRESS_LOCK = threading.Lock()
 
 
 app = Flask(__name__)
@@ -73,6 +78,54 @@ def ensure_runtime_folders():
 
 def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def _canonical_progress_token(value):
+    try:
+        return str(UUID(str(value or "")))
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+
+def _set_training_progress(
+    progress_token,
+    admin_id,
+    percent,
+    stage,
+    detail="",
+    state="running",
+):
+    """Store short-lived progress for the upload page's polling endpoint."""
+    token = _canonical_progress_token(progress_token)
+    if not token:
+        return
+
+    now = time.time()
+    with TRAINING_PROGRESS_LOCK:
+        expired = [
+            key
+            for key, value in TRAINING_PROGRESS.items()
+            if now - value["updated_at"] > TRAINING_PROGRESS_TTL_SECONDS
+        ]
+        for key in expired:
+            TRAINING_PROGRESS.pop(key, None)
+        TRAINING_PROGRESS[token] = {
+            "admin_id": admin_id,
+            "percent": max(0, min(int(percent), 100)),
+            "stage": str(stage),
+            "detail": str(detail or ""),
+            "state": state,
+            "updated_at": now,
+        }
+
+
+def _get_training_progress(progress_token):
+    token = _canonical_progress_token(progress_token)
+    if not token:
+        return None
+    with TRAINING_PROGRESS_LOCK:
+        progress = TRAINING_PROGRESS.get(token)
+        return dict(progress) if progress else None
 
 
 def save_uploaded_file(uploaded_file):
@@ -434,10 +487,32 @@ def upload_dataset():
             }
             for index, name in enumerate(MODEL_IDS.values())
         ]
-        return render_template("upload.html", models=models)
+        progress_token = str(uuid4())
+        _set_training_progress(
+            progress_token,
+            current_admin_id(),
+            0,
+            "Ready to upload",
+            "Choose a CSV dataset to begin.",
+            state="ready",
+        )
+        return render_template(
+            "upload.html",
+            models=models,
+            progress_token=progress_token,
+        )
 
     uploaded_file = request.files.get("dataset")
     filename = secure_filename(uploaded_file.filename) if uploaded_file else ""
+    progress_token = request.form.get("progress_token", "")
+    admin_id = current_admin_id()
+    _set_training_progress(
+        progress_token,
+        admin_id,
+        10,
+        "Upload received",
+        "Checking the selected file.",
+    )
     _log(
         "Dataset",
         "csv_upload_started",
@@ -447,10 +522,26 @@ def upload_dataset():
     )
 
     if not uploaded_file or not uploaded_file.filename:
+        _set_training_progress(
+            progress_token,
+            admin_id,
+            100,
+            "Upload failed",
+            "No CSV file was selected.",
+            state="failed",
+        )
         _log("Dataset", "validation_failed", "Failed", message="No CSV file selected.")
         flash("Please choose one CSV file before starting analysis.", "danger")
         return redirect(url_for("upload_dataset"))
     if not allowed_file(uploaded_file.filename):
+        _set_training_progress(
+            progress_token,
+            admin_id,
+            100,
+            "Upload failed",
+            "AlgoGuard accepts CSV files only.",
+            state="failed",
+        )
         _log(
             "Dataset",
             "validation_failed",
@@ -465,6 +556,13 @@ def upload_dataset():
     try:
         file_path, original_name, stored_name = save_uploaded_file(uploaded_file)
         run_id = create_training_run(current_admin_id(), original_name, stored_name)
+        _set_training_progress(
+            progress_token,
+            admin_id,
+            14,
+            "Dataset saved",
+            f"Training run #{run_id} has been created.",
+        )
         logger = _training_logger(run_id, original_name)
         _log(
             "Dataset",
@@ -484,6 +582,13 @@ def upload_dataset():
         )
 
         update_training_run(run_id, validation_status="in_progress")
+        _set_training_progress(
+            progress_token,
+            admin_id,
+            18,
+            "Validating dataset",
+            "Checking columns, target labels, and class balance.",
+        )
         _log(
             "Dataset",
             "validation_started",
@@ -505,6 +610,14 @@ def upload_dataset():
         try:
             prepared = prepare_dataset(file_path)
         except ValueError as error:
+            _set_training_progress(
+                progress_token,
+                admin_id,
+                100,
+                "Validation failed",
+                str(error),
+                state="failed",
+            )
             update_training_run(
                 run_id,
                 validation_status="failed",
@@ -544,6 +657,16 @@ def upload_dataset():
             preprocessing_status="completed",
             training_status="in_progress",
         )
+        _set_training_progress(
+            progress_token,
+            admin_id,
+            25,
+            "Preprocessing complete",
+            (
+                f"Prepared {prepared.summary['rows']:,} rows and "
+                f"{prepared.summary['features']} features."
+            ),
+        )
         _log(
             "Dataset",
             "validation_passed",
@@ -561,11 +684,35 @@ def upload_dataset():
             dataset_filename=original_name,
         )
 
+        def update_model_progress(completed, total, model_name, status):
+            percent = 25 + round((completed / total) * 60)
+            if status == "started":
+                stage = f"Training {model_name}"
+                detail = f"Model {completed + 1} of {total} is running."
+            else:
+                stage = f"Finished {model_name}"
+                detail = f"{completed} of {total} model attempts completed."
+            _set_training_progress(
+                progress_token,
+                admin_id,
+                percent,
+                stage,
+                detail,
+            )
+
         results = train_and_compare_models(
             prepared,
             app.config["SAVED_MODEL_FOLDER"],
             run_id,
             event_logger=logger,
+            progress_callback=update_model_progress,
+        )
+        _set_training_progress(
+            progress_token,
+            admin_id,
+            90,
+            "Ranking models",
+            "Comparing all valid candidates across nine normalized metrics.",
         )
         _log(
             "Training",
@@ -578,6 +725,13 @@ def upload_dataset():
         save_training_results(run_id, results["model_results"], results["best_model"])
         report_name = save_report(run_id, results["model_results"])
         insert_report(current_admin_id(), "Model Performance", run_id=run_id)
+        _set_training_progress(
+            progress_token,
+            admin_id,
+            97,
+            "Saving results",
+            "Writing model records and the performance report.",
+        )
         _log(
             "Reports",
             "report_generated",
@@ -594,9 +748,25 @@ def upload_dataset():
             )
         else:
             flash("Training finished, but no candidate completed all required metrics.", "warning")
+        _set_training_progress(
+            progress_token,
+            admin_id,
+            100,
+            "Analysis complete",
+            "Opening the training results.",
+            state="complete",
+        )
         return redirect(url_for("training_results", run_id=run_id))
 
     except Exception as error:
+        _set_training_progress(
+            progress_token,
+            admin_id,
+            100,
+            "Analysis failed",
+            str(error),
+            state="failed",
+        )
         if run_id:
             update_training_run(
                 run_id,
@@ -616,6 +786,16 @@ def upload_dataset():
         return redirect(
             url_for("training_results", run_id=run_id) if run_id else url_for("upload_dataset")
         )
+
+
+@app.route("/training-progress/<progress_token>")
+def training_progress(progress_token):
+    progress = _get_training_progress(progress_token)
+    if not progress or progress["admin_id"] != current_admin_id():
+        return jsonify({"status": "error", "message": "Progress session not found."}), 404
+    progress.pop("admin_id", None)
+    progress.pop("updated_at", None)
+    return jsonify({"status": "success", **progress})
 
 
 @app.route("/results")

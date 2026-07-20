@@ -27,6 +27,16 @@ def _emit(event_logger, action, status, model_name=None, message=None):
         )
 
 
+def _emit_progress(progress_callback, completed, total, model_name, status):
+    """Keep optional UI reporting isolated from the training result."""
+    if not progress_callback:
+        return
+    try:
+        progress_callback(completed, total, model_name, status)
+    except Exception:
+        pass
+
+
 def _positive_probabilities(pipeline, X_test):
     if not hasattr(pipeline, "predict_proba"):
         raise ValueError("The trained pipeline does not provide probabilities.")
@@ -67,6 +77,7 @@ def train_and_compare_models(
     saved_model_folder,
     run_id,
     event_logger=None,
+    progress_callback=None,
 ):
     """Train exactly seven independent candidates and isolate model failures."""
     run_folder = os.path.join(saved_model_folder, f"run_{run_id}")
@@ -80,10 +91,18 @@ def train_and_compare_models(
         n_neighbors=n_neighbors,
     )
     model_results = []
+    candidate_count = len(candidates)
 
-    for model_id, specification in candidates.items():
+    for candidate_index, (model_id, specification) in enumerate(candidates.items(), start=1):
         model_name = specification["model_name"]
         model_type = specification["model_type"]
+        _emit_progress(
+            progress_callback,
+            candidate_index - 1,
+            candidate_count,
+            model_name,
+            "started",
+        )
         action_prefix = model_id if model_id in {"soft_voting", "stacking"} else "individual_model"
         _emit(
             event_logger,
@@ -190,6 +209,13 @@ def train_and_compare_models(
             )
 
         model_results.append(result)
+        _emit_progress(
+            progress_callback,
+            candidate_index,
+            candidate_count,
+            model_name,
+            result["status"],
+        )
 
     try:
         normalize_model_results(model_results)

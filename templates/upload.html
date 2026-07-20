@@ -17,6 +17,7 @@
 
 <section class="upload-layout">
     <form class="upload-panel" method="post" enctype="multipart/form-data" id="uploadForm">
+        <input type="hidden" id="progressToken" name="progress_token" value="{{ progress_token }}">
         <label for="dataset" class="upload-dropzone">
             <i class="bi bi-filetype-csv"></i>
             <span id="fileLabel">Choose CSV dataset</span>
@@ -29,6 +30,20 @@
             <div><i class="bi bi-check-circle"></i> Scales numerical features</div>
             <div><i class="bi bi-check-circle"></i> Saves trained Joblib pipelines</div>
         </div>
+
+        <section class="training-progress" id="trainingProgress" aria-live="polite" hidden>
+            <div class="training-progress-heading">
+                <span>
+                    <small>Analysis progress</small>
+                    <strong id="progressStage">Preparing upload</strong>
+                </span>
+                <strong class="training-progress-percent" id="progressPercent">0%</strong>
+            </div>
+            <div class="training-progress-track" id="progressTrack" role="progressbar" aria-label="Dataset analysis progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                <span id="progressBar"></span>
+            </div>
+            <p id="progressDetail">Uploading the selected CSV dataset.</p>
+        </section>
 
         <button class="btn btn-accent w-100" type="submit" id="trainButton">
             <i class="bi bi-cpu"></i>
@@ -72,14 +87,101 @@ const input = document.getElementById('dataset');
 const label = document.getElementById('fileLabel');
 const form = document.getElementById('uploadForm');
 const button = document.getElementById('trainButton');
+const progressToken = document.getElementById('progressToken').value;
+const progressPanel = document.getElementById('trainingProgress');
+const progressStage = document.getElementById('progressStage');
+const progressPercent = document.getElementById('progressPercent');
+const progressTrack = document.getElementById('progressTrack');
+const progressBar = document.getElementById('progressBar');
+const progressDetail = document.getElementById('progressDetail');
+const progressUrl = {{ url_for('training_progress', progress_token=progress_token)|tojson }};
+let progressPoll = null;
 
 input.addEventListener('change', () => {
     label.textContent = input.files[0]?.name || 'Choose CSV dataset';
 });
 
-form.addEventListener('submit', () => {
+function renderProgress(percent, stage, detail, state = 'running') {
+    const safePercent = Math.max(0, Math.min(Math.round(Number(percent) || 0), 100));
+    progressPanel.hidden = false;
+    progressPanel.classList.toggle('is-complete', state === 'complete');
+    progressPanel.classList.toggle('is-failed', state === 'failed');
+    progressStage.textContent = stage || 'Processing dataset';
+    progressPercent.textContent = `${safePercent}%`;
+    progressBar.style.width = `${safePercent}%`;
+    progressTrack.setAttribute('aria-valuenow', String(safePercent));
+    progressDetail.textContent = detail || 'AlgoGuard is processing the dataset.';
+}
+
+async function refreshProgress() {
+    try {
+        const response = await fetch(progressUrl, {
+            cache: 'no-store',
+            headers: {'Accept': 'application/json'},
+        });
+        if (!response.ok) return;
+        const progress = await response.json();
+        renderProgress(progress.percent, progress.stage, progress.detail, progress.state);
+    } catch (_error) {
+        // The upload request remains authoritative if a poll is briefly delayed.
+    }
+}
+
+function stopPolling() {
+    if (progressPoll) {
+        window.clearInterval(progressPoll);
+        progressPoll = null;
+    }
+}
+
+form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    if (!form.reportValidity()) return;
+
+    const formData = new FormData(form);
     button.disabled = true;
-    button.innerHTML = '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span> Training in progress';
+    input.disabled = true;
+    button.innerHTML = '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span> Processing dataset';
+    renderProgress(0, 'Uploading dataset', 'Sending the selected CSV to AlgoGuard.');
+
+    const request = new XMLHttpRequest();
+    request.open('POST', form.action || window.location.href);
+    request.upload.addEventListener('progress', (uploadEvent) => {
+        if (!uploadEvent.lengthComputable) return;
+        const uploadPercent = Math.max(1, Math.round((uploadEvent.loaded / uploadEvent.total) * 10));
+        renderProgress(
+            uploadPercent,
+            uploadPercent >= 10 ? 'Upload complete' : 'Uploading dataset',
+            uploadPercent >= 10
+                ? 'Waiting for server-side validation to begin.'
+                : `Transferred ${Math.round((uploadEvent.loaded / uploadEvent.total) * 100)}% of the CSV file.`
+        );
+    });
+
+    request.addEventListener('load', async () => {
+        stopPolling();
+        await refreshProgress();
+        if (request.status >= 200 && request.status < 400) {
+            window.location.assign(request.responseURL || window.location.href);
+            return;
+        }
+        input.disabled = false;
+        button.disabled = false;
+        button.innerHTML = '<i class="bi bi-arrow-repeat"></i> Try Again';
+        renderProgress(100, 'Request failed', 'The server could not process this upload.', 'failed');
+    });
+
+    request.addEventListener('error', () => {
+        stopPolling();
+        input.disabled = false;
+        button.disabled = false;
+        button.innerHTML = '<i class="bi bi-arrow-repeat"></i> Try Again';
+        renderProgress(100, 'Connection interrupted', 'Check the local server and try again.', 'failed');
+    });
+
+    request.send(formData);
+    progressPoll = window.setInterval(refreshProgress, 700);
+    window.setTimeout(refreshProgress, 150);
 });
 </script>
 {% endblock %}

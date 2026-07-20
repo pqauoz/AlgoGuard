@@ -120,11 +120,17 @@ def trained_bundle(app_module, binary_dataframe, prepared_dataset, tmp_path_fact
         )
 
     model_folder = tmp_path_factory.mktemp("trained-models")
+    progress_events = []
+
+    def progress_callback(completed, total, model_name, status):
+        progress_events.append((completed, total, model_name, status))
+
     result = train_and_compare_models(
         prepared_dataset,
         str(model_folder),
         run_id,
         event_logger=event_logger,
+        progress_callback=progress_callback,
     )
     db.save_training_results(run_id, result["model_results"], result["best_model"])
     db.log_system_event(
@@ -142,4 +148,5 @@ def trained_bundle(app_module, binary_dataframe, prepared_dataset, tmp_path_fact
         "result": result,
         "frame": binary_dataframe,
         "prepared": prepared_dataset,
+        "progress_events": progress_events,
     }

@@ -60,3 +60,14 @@ def test_successful_run_produces_seven_results(trained_bundle):
     assert len(results) == 7
     assert len(list_model_results(trained_bundle["run_id"])) == 7
     assert all(result["status"] == "completed" for result in results)
+
+
+def test_training_reports_start_and_completion_for_each_model(trained_bundle):
+    events = trained_bundle["progress_events"]
+    started = [event for event in events if event[3] == "started"]
+    completed = [event for event in events if event[3] == "completed"]
+
+    assert len(started) == 7
+    assert len(completed) == 7
+    assert [event[0] for event in completed] == list(range(1, 8))
+    assert all(event[1] == 7 for event in events)
