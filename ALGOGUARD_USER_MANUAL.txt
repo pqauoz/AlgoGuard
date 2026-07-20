@@ -1,731 +1,952 @@
-ALGOGUARD USER MANUAL
-Version: Seven-Model Training and Deployment Workflow
+ALGOGUARD USER MANUAL AND DATA GUIDE
+====================================
 
-======================================================================
-1. WHAT ALGOGUARD IS
-======================================================================
-
-AlgoGuard is a local Flask web application for binary network traffic
-classification. It accepts one labeled CSV dataset at a time, trains seven
-machine-learning approaches, compares them using nine metrics, recommends the
-best valid model, and lets an administrator deploy the recommendation.
-
-After deployment, an admin can enter one traffic record manually. AlgoGuard
-classifies it as Normal or Attack using only the active deployed pipeline.
-
-AlgoGuard does not capture live packets, monitor a network continuously, or
-block an attack. It is a research and capstone prototype for prepared CSV data
-and manual prediction.
+This guide explains how to use AlgoGuard from start to finish, including what
+data to upload, what values to put in the Simulation page, and what happens if
+the system detects an anomaly.
 
 
-======================================================================
-2. FRONTEND AND BACKEND
-======================================================================
+1. WHAT ALGOGUARD DOES
+----------------------
 
-The project contains both.
+AlgoGuard is a web application that demonstrates network anomaly detection.
 
-Frontend:
-- HTML templates in templates/
-- Bootstrap 5 components
-- Dark dashboard styles in static/css/style.css
-- Forms, tables, status badges, filters, and navigation
+It has two main modes:
 
-Backend:
-- Flask routes in app.py
-- Pandas and Scikit-learn services in services/
-- SQLite records in database/algoguard.sqlite3
-- Joblib artifacts in saved_models/
-- CSV reports in reports/
+1. Dataset Mode
+   Upload a CSV dataset, train machine learning models, compare the results,
+   and identify the best model.
 
-The browser sends forms or JSON to Flask. Flask validates the request, calls
-the relevant service, saves records, and renders the response page.
+2. Simulation Mode
+   Type one network traffic example manually and let the pretrained model
+   classify it as Normal or Attack.
+
+Important:
+AlgoGuard is a simulation/prototype. It does not capture live network packets
+from your Wi-Fi or LAN. It analyzes CSV files and manual inputs.
 
 
-======================================================================
-3. REQUIRED SOFTWARE
-======================================================================
+2. HOW TO RUN ALGOGUARD
+-----------------------
 
-- Windows 10 or Windows 11
-- Python 3.10 or newer
-- A modern web browser
-- Git, when cloning or pushing the project
+Open a terminal in the project folder:
 
-Python packages are listed in requirements.txt:
-- Flask
-- Pandas
-- NumPy
-- Scikit-learn
-- Joblib
-- psutil
+C:\Users\Client\Documents\AlgoGuard
+
+Then run:
+
+venv\Scripts\activate
+python -m pip install -r requirements.txt
+python app.py
+
+if python is not on path, run with the existing virtual environment
+.\venv\Scripts\python.exe app.py
+
+Then open:
+
+http://localhost:5000
+
+Default local login:
+
+Username:
+admin
+
+Password:
+admin123
+
+Important:
+The default admin is created only when the local SQLite database is first
+created. For a real deployment, change the admin username/password using
+environment variables before the first run.
+
+After logging in with an Administrator account, open the Admins page to create
+more admin accounts. Each new admin is stored in SQLite with a hashed password.
+
+If port 5000 is busy:
+
+set ALGOGUARD_PORT=5001
+python app.py
+
+Then open:
+
+http://localhost:5001
 
 
-======================================================================
-4. FIRST-TIME INSTALLATION
-======================================================================
+3. WEBSITE PAGES
+----------------
 
-Open PowerShell in the project root. The correct directory contains app.py,
-requirements.txt, services/, templates/, and static/.
+Login
+    Opens the protected admin entry page. You must sign in before using the
+    Dashboard, Upload, Results, or Simulation pages.
+
+Admins
+    Allows an Administrator account to create and review multiple admin
+    accounts.
+
+Dashboard
+    Shows the AlgoGuard overview, latest dataset result, normal/anomaly
+    counts, and best model after training.
+
+Upload
+    Uploads a CSV dataset and trains models.
+
+Results
+    Shows the model comparison table after dataset training.
+
+Simulation
+    Lets you manually type one network flow and predict if it is Normal or
+    Attack.
+
+
+4. DATASET MODE: WHAT CSV DATA TO PUT
+-------------------------------------
+
+The uploaded file must be a CSV file.
+
+The last column must be the target label.
 
 Example:
 
-  cd C:\Users\Client\Documents\AlgoGuard
+dur,rate,proto,state,sbytes,dbytes,label
+0.10,12,tcp,CON,500,420,normal
+0.01,5000,tcp,REQ,2000,60,attack
 
-Create a virtual environment:
+In this example:
 
-  py -m venv venv
+Features:
+    dur
+    rate
+    proto
+    state
+    sbytes
+    dbytes
 
-Activate it in PowerShell:
+Target label:
+    label
 
-  .\venv\Scripts\Activate.ps1
-
-Install the application dependencies:
-
-  python -m pip install --upgrade pip
-  python -m pip install -r requirements.txt
-
-If activation is blocked or confusing, use the virtual-environment Python
-directly:
-
-  .\venv\Scripts\python.exe -m pip install -r requirements.txt
-  .\venv\Scripts\python.exe app.py
-
-The command prompt normally begins with (venv) after activation. Installing
-packages with one Python and running a different Python causes errors such as:
-
-  ModuleNotFoundError: No module named 'flask'
+The target label is the answer that tells the model whether the row is normal
+or attack/anomaly.
 
 
-======================================================================
-5. DATABASE MIGRATION
-======================================================================
+5. SIMPLE SAMPLE CSV YOU CAN TEST
+---------------------------------
 
-Run this from the project root after pulling a version with schema updates:
+You can create a file named sample_network_traffic.csv with this content:
 
-  python migrate.py
+dur,rate,proto,state,spkts,dpkts,sbytes,dbytes,sttl,dttl,label
+0.10,12,tcp,CON,12,9,500,420,64,64,normal
+0.20,10,udp,CON,14,8,520,430,64,64,normal
+0.15,11,tcp,FIN,11,10,480,390,64,64,normal
+0.12,14,udp,CON,13,9,510,405,64,64,normal
+0.11,13,tcp,CON,12,8,505,415,64,64,normal
+0.18,9,udp,FIN,15,11,530,440,64,64,normal
+0.01,5000,tcp,REQ,1,1,2000,60,254,0,attack
+0.02,4500,tcp,INT,1,1,1900,55,254,0,attack
+0.01,4800,udp,REQ,1,1,2100,65,254,0,attack
+0.03,5200,tcp,INT,1,1,2200,70,254,0,attack
+0.02,4700,tcp,REQ,1,1,2050,58,254,0,attack
+0.01,5100,udp,INT,1,1,2150,68,254,0,attack
 
-The migration is additive. It creates missing tables and columns without
-deleting existing admins, model records, predictions, alerts, reports, or logs.
-The app also checks migrations at startup.
+This sample has:
 
-Do not delete database/algoguard.sqlite3 as an upgrade method. Deletion removes
-local records. Back up the file before important demonstrations.
-
-
-======================================================================
-6. STARTING ALGOGUARD
-======================================================================
-
-From the project root with the environment active:
-
-  python app.py
-
-Open:
-
-  http://127.0.0.1:5000
-
-The default account is created only when a new database has no admins:
-
-  Username: admin
-  Password: admin123
-
-Set stronger credentials and a secret before the first run of a new setup:
-
-  $env:ALGOGUARD_ADMIN_USERNAME = "your_admin"
-  $env:ALGOGUARD_ADMIN_PASSWORD = "your-strong-password"
-  $env:ALGOGUARD_ADMIN_EMAIL = "admin@example.com"
-  $env:ALGOGUARD_SECRET_KEY = "a-long-random-secret"
-  python app.py
+- 6 normal rows
+- 6 attack rows
+- categorical columns: proto, state
+- numerical columns: dur, rate, spkts, dpkts, sbytes, dbytes, sttl, dttl
+- target column: label
 
 
-======================================================================
-7. LOGIN, SESSIONS, AND MULTIPLE ADMINS
-======================================================================
+6. WHAT NORMAL DATA CAN LOOK LIKE
+---------------------------------
 
-AlgoGuard uses Flask session-based login. The browser stores a signed session
-cookie after a successful login. The password is not placed in that cookie.
+Normal traffic usually has values that look moderate and consistent.
 
-A login session is not the same as a permanent API token. It ends when the
-admin logs out, the cookie is removed, or the application invalidates it.
-Admin accounts themselves are permanent SQLite records until they are changed
-or removed through database administration.
+Example normal row:
 
-Passwords are stored as password hashes, not readable plain-text passwords.
+dur,rate,proto,state,spkts,dpkts,sbytes,dbytes,sttl,dttl,label
+0.10,12,tcp,CON,12,9,500,420,64,64,normal
 
-An Administrator can open Admins and create multiple accounts. Supported roles:
-- Administrator: can use the system and create admin accounts
-- Analyst: can use operational pages but cannot create admin accounts
+Meaning:
 
+dur
+    The connection duration. 0.10 means short but not extreme.
 
-======================================================================
-8. NAVIGATION
-======================================================================
+rate
+    Packets per second. 12 is a moderate value.
 
-Dashboard:
-Shows the latest run, recommendation, active deployment, latest prediction,
-recent alerts, and recent system events.
+proto
+    Protocol. tcp or udp are common.
 
-Upload:
-Accepts one CSV and starts one independent training run.
+state
+    Connection state. CON or FIN can appear in normal traffic.
 
-Runs:
-Shows persistent training history. Opening a run displays its seven results.
+spkts and dpkts
+    Source and destination packet counts.
 
-Predict:
-Uses only the active deployed artifact for one manually entered record.
+sbytes and dbytes
+    Source and destination byte counts.
 
-Alerts:
-Shows attack predictions that created security alerts.
+sttl and dttl
+    Time-to-live values. Normal traffic often uses reasonable TTL values such
+    as 64.
 
-Logs:
-Shows application and audit events with filters and pagination.
-
-Admins:
-Creates and lists accounts. Visible only to Administrator accounts.
+label
+    normal
 
 
-======================================================================
-9. HOW TO CREATE A CSV FILE
-======================================================================
+7. WHAT ANOMALY DATA CAN LOOK LIKE
+----------------------------------
 
-Method A - Microsoft Excel:
+Anomaly or attack-like traffic often has unusual/extreme values.
 
-1. Open a blank workbook.
-2. Type column names in the first row.
-3. Add one network traffic observation per following row.
-4. Put the target label in the last column.
-5. Select File, Save As.
-6. Choose CSV UTF-8 (Comma delimited) (*.csv).
-7. Save the file.
+Example anomaly row:
 
-Method B - Notepad:
+dur,rate,proto,state,spkts,dpkts,sbytes,dbytes,sttl,dttl,label
+0.01,5000,tcp,REQ,1,1,2000,60,254,0,attack
 
-1. Enter column names separated by commas.
-2. Put each traffic record on a new line.
-3. Keep the same number and order of values on every row.
-4. Save the filename with a .csv extension and UTF-8 encoding.
+Why this can look suspicious:
+
+rate = 5000
+    Very high packet rate.
+
+state = REQ
+    A request state that may indicate incomplete or suspicious communication.
+
+sttl = 254
+    High source TTL can appear in some attack patterns.
+
+dttl = 0
+    Destination TTL of 0 can look abnormal depending on the dataset.
+
+sbytes much larger than dbytes
+    One-sided traffic can sometimes indicate suspicious behavior.
+
+label = attack
+    This tells the training workflow that this row is an anomaly/attack.
+
+
+8. WHAT HAPPENS IF YOU PUT AN ANOMALY IN THE DATASET
+----------------------------------------------------
+
+If your CSV contains anomaly rows, AlgoGuard uses them during training and
+testing.
 
 Example:
 
-  dur,proto,service,state,spkts,dpkts,sbytes,dbytes,rate,sttl,dttl,sload,dload,sinpkt,dinpkt,label
-  2.001348,tcp,-,FIN,16,14,862,802,14.490233,254,252,3233.820312,2977.99292,133.423196,146.368077,Normal
-  1.665064,tcp,ftp-data,FIN,14,6,8928,320,11.410973,31,29,39835.10547,1282.833618,128.081847,332.462,Normal
-  0.472012,tcp,http,FIN,10,8,834,354,36.016032,254,252,12728.48926,5254.103516,52.445778,60.35343,Attack
-  0.320972,tcp,http,FIN,10,8,784,1256,52.964122,62,252,17596.55078,27391.79688,35.663556,38.518145,Attack
+normal rows teach the model what normal traffic looks like.
+attack rows teach the model what suspicious traffic looks like.
 
-Do not add commas inside ordinary text values unless the value is correctly
-quoted according to CSV rules.
+After upload, AlgoGuard:
 
+1. Reads the CSV.
+2. Treats the last column as the label.
+3. Counts normal and anomaly rows.
+4. Encodes text columns like proto and state.
+5. Scales numerical values.
+6. Splits the data into training and testing sets.
+7. Trains Random Forest, Gradient Boosting, and Voting Classifier.
+8. Tests each model.
+9. Shows the metrics.
+10. Saves model records and report metadata in SQLite.
+11. Chooses the best-performing model.
 
-======================================================================
-10. WHAT ROWS AND COLUMNS MEAN
-======================================================================
+If the model predicts anomaly correctly:
+    Recall and F1-score may improve.
 
-A row represents one observation. In network data, it may represent one flow,
-connection, summarized packet group, or event depending on the source dataset.
+If the model predicts normal traffic as anomaly:
+    False Positive Rate increases.
 
-A feature column represents one property measured for every observation. The
-three included AlgoGuard datasets use these 15 input features:
+If the model misses actual anomalies:
+    Recall may decrease.
 
-dur:
-Total duration of the traffic flow.
 
-proto:
-Network protocol, such as tcp, udp, or icmp.
+9. WHAT HAPPENS IF ALL DATA IS NORMAL
+-------------------------------------
 
-service:
-Detected network service, such as http, dns, ftp-data, or ssh. A dash means no
-specific service was identified in the source data.
+The app will reject the dataset if the target label has only one class.
 
-state:
-Connection state, such as FIN, CON, REQ, or INT.
+Example bad dataset:
 
-spkts and dpkts:
-Packet counts from source to destination and destination to source.
+dur,rate,proto,state,label
+0.10,12,tcp,CON,normal
+0.20,10,udp,CON,normal
+0.15,11,tcp,FIN,normal
 
-sbytes and dbytes:
-Byte counts from source to destination and destination to source.
+Why it is rejected:
+The model needs at least two classes to learn classification.
 
-rate:
-Overall packet rate for the traffic flow.
+Good dataset:
+Must have at least:
 
-sttl and dttl:
-Source and destination time-to-live values.
+- one normal class
+- one attack/anomaly class
 
-sload and dload:
-Source and destination traffic load rates.
+Also, each class should have enough rows for train/test split.
 
-sinpkt and dinpkt:
-Source and destination packet inter-arrival times.
 
-label:
-The known answer used for supervised learning. It must be the last column.
+10. WHAT HAPPENS IF ALL DATA IS ATTACK
+--------------------------------------
 
-This is the standardized schema for the included files, but it is not a fixed
-requirement for every external CSV. AlgoGuard learns the feature list from each
-uploaded CSV and saves it with the deployed artifact. Prediction input must
-match the schema used to train that deployed model.
+This is also invalid for training.
 
+The model cannot learn the difference between normal and attack if it only sees
+attack rows.
 
-======================================================================
-11. WHAT TO PUT IN THE TARGET COLUMN
-======================================================================
+The dataset should contain both normal and attack/anomaly examples.
 
-The final column must contain exactly two classes representing:
 
-- Normal: expected or benign traffic
-- Attack: anomalous or malicious traffic
+11. WHAT LABEL NAMES CAN YOU USE
+--------------------------------
 
-Recommended labels are Normal and Attack. AlgoGuard also recognizes common
-normal labels such as 0, benign, legitimate, and clean. With another binary
-pair, it selects a consistent mapping, but explicit Normal and Attack labels
-make the dataset and documentation easier to understand.
+Recommended labels:
 
-Both classes need at least three rows for validation. A useful model needs many
-more representative examples. The three-row rule only prevents an impossible
-stratified split; it does not guarantee reliable model quality.
+normal
+attack
 
-What happens if an Attack row is added?
+Also acceptable:
 
-The row becomes one labeled training example. It does not add an alert and does
-not force all similar future traffic to be classified as Attack. The seven
-models learn statistical boundaries from all training rows. The held-out test
-rows evaluate how well those learned boundaries generalize.
+0
+1
 
-Do not invent attack labels merely to improve a metric. Incorrect labels teach
-the wrong behavior and make Accuracy, Recall, F1, and ROC-AUC misleading.
+benign
+malicious
 
+Best for this project:
 
-======================================================================
-12. CSV VALIDATION RULES
-======================================================================
+normal
+attack
 
-The upload must:
-- Be one .csv file
-- Have a header row
-- Contain at least one usable feature column
-- Use the last column as the target
-- Contain exactly two non-missing target classes
-- Have enough rows in both classes for stratified training and testing
-- Avoid duplicate column names
+Reason:
+The dashboard can more clearly count normal and anomaly rows when the normal
+label is named "normal".
 
-Feature columns can be numeric or categorical. Completely empty feature columns
-are removed. Numeric and categorical missing values are imputed by the saved
-pipeline. Unseen text categories during prediction are ignored safely by the
-one-hot encoder.
 
+12. IMPORTANT CSV RULES
+-----------------------
 
-======================================================================
-13. ONE CSV PER TRAINING RUN
-======================================================================
+Rule 1:
+The file must end with .csv.
 
-Every upload creates a new run ID. AlgoGuard never merges the new CSV with an
-older upload and never overwrites an older run.
+Rule 2:
+The file must have at least two columns:
 
-Each run stores:
-- Admin ID
-- Original and stored filenames
-- Upload timestamp
-- Row and feature counts
-- Target column and class distribution
-- Validation, preprocessing, and training status
-- Seven model result records
-- Recommended model and normalized score
-- Deployment status
-- Completion time or safe error message
+- one or more feature columns
+- one target label column
 
-Use Runs to compare separate Big, Bigger, and Biggest experiments manually.
-AlgoGuard does not calculate a cross-dataset winner automatically.
+Rule 3:
+The target label must be the last column.
 
+Rule 4:
+The target column must not be empty.
 
-======================================================================
-14. PREPROCESSING AND DATA LEAKAGE PREVENTION
-======================================================================
+Rule 5:
+The target column must contain at least two classes.
 
-AlgoGuard performs a stratified train/test split before fitting preprocessing.
-The test set is not used to calculate imputations, scaling values, or encoded
-categories.
+Rule 6:
+Each class should have enough rows for training/testing.
 
-For each model pipeline:
-- Missing numeric values use the training median
-- Numeric values use StandardScaler
-- Missing categorical values use the training mode
-- Categorical values use OneHotEncoder
-- Unknown prediction categories are ignored safely
+Rule 7:
+Text columns are allowed.
 
-Every model uses the same raw training and test records. Each complete Joblib
-artifact contains preprocessing and its classifier together. This prevents the
-manual prediction page from using mismatched columns, scaling, or encoding.
+Example:
+proto,state
 
+Rule 8:
+Numerical columns are allowed.
 
-======================================================================
-15. THE SEVEN MODEL APPROACHES
-======================================================================
+Example:
+dur,rate,sbytes,dbytes
 
-1. Random Forest
-Builds many decision trees from sampled training data and combines their votes.
-It captures nonlinear patterns and interactions and is generally robust.
 
-2. Gradient Boosting
-Builds trees sequentially. Each stage focuses on errors from the preceding
-stages, producing a strong combined classifier.
+13. GOOD CSV EXAMPLE
+--------------------
 
-3. AdaBoost
-Sequentially increases attention on misclassified examples and combines weak
-learners into a weighted classifier.
+dur,rate,proto,state,label
+0.10,12,tcp,CON,normal
+0.20,10,udp,CON,normal
+0.15,11,tcp,FIN,normal
+0.12,14,udp,CON,normal
+0.01,5000,tcp,REQ,attack
+0.02,4500,tcp,INT,attack
+0.01,4800,udp,REQ,attack
+0.03,5200,tcp,INT,attack
 
-4. K-Nearest Neighbors
-Classifies an input using nearby training observations. Scaling is important,
-which is why KNN is inside the same preprocessing pipeline.
 
-5. Naive Bayes
-GaussianNB estimates class probabilities under a conditional independence
-assumption. It is efficient and provides a useful probabilistic baseline.
+14. BAD CSV EXAMPLES
+--------------------
 
-6. Soft Voting Ensemble
-Uses fresh instances of all five individual estimators. It averages predicted
-class probabilities. It is soft voting, not hard voting.
+Bad example 1: no target label
 
-7. Stacking Ensemble
-Uses fresh instances of all five individual estimators as base learners.
-Logistic Regression learns from their probability outputs as the final
-estimator. Gradient Boosting is a base learner, not the stacking meta-learner.
+dur,rate,proto,state
+0.10,12,tcp,CON
+0.01,5000,tcp,REQ
 
+Problem:
+The app assumes the last column is the label, so it would treat "state" as the
+target by mistake.
 
-======================================================================
-16. THE NINE RANKING METRICS
-======================================================================
+Bad example 2: only one class
 
-Higher is better:
+dur,rate,proto,state,label
+0.10,12,tcp,CON,normal
+0.20,10,udp,CON,normal
 
-Accuracy:
-The percentage of all test rows classified correctly.
+Problem:
+Only normal exists. The model needs normal and attack/anomaly.
 
-Precision:
-Of rows predicted as Attack, the percentage that were actually Attack.
+Bad example 3: empty labels
 
-Recall:
-Of actual Attack rows, the percentage detected as Attack.
+dur,rate,proto,state,label
+0.10,12,tcp,CON,
+0.01,5000,tcp,REQ,attack
 
-F1-score:
-The harmonic balance between Precision and Recall.
+Problem:
+The target label column has missing values.
 
-ROC-AUC:
-How well attack probabilities rank Attack above Normal across thresholds.
+Bad example 4: too few rows
 
-Lower is better:
+dur,rate,proto,state,label
+0.10,12,tcp,CON,normal
+0.01,5000,tcp,REQ,attack
 
-False Positive Rate:
-FP / (FP + TN). It measures Normal rows incorrectly classified as Attack.
+Problem:
+Too few rows for a reliable train/test split.
 
-CPU Usage:
-Process CPU time in seconds consumed during fitting and test prediction.
-It is not a CPU percentage.
 
-RAM Usage:
-Peak increase in the Flask process resident memory during the same measured
-interval, stored in MB.
+15. SIMULATION PAGE: WHAT TO TYPE
+---------------------------------
 
-Model Size:
-Size in MB of the complete serialized Joblib artifact, including preprocessing
-and classifier.
+Go to:
 
-Processing or wall time may be stored for reference but is not a tenth ranking
-metric. Prediction latency is stored only for individual prediction records.
+http://localhost:5000/simulation
 
+The page asks for:
 
-======================================================================
-17. NORMALIZATION, SCORE, AND RECOMMENDATION
-======================================================================
+Duration
+Rate
+Source Packets
+Destination Packets
+Source Bytes
+Destination Bytes
+Source TTL
+Destination TTL
+Protocol
+State
 
-Raw percentages, seconds, and MB cannot be averaged directly. AlgoGuard applies
-min-max normalization across valid candidates for each metric.
 
-Higher-is-better formula:
+16. SIMULATION NORMAL TEST
+--------------------------
 
-  (value - minimum) / (maximum - minimum)
+Try these values:
 
-Lower-is-better formula:
+Duration:
+0.001
 
-  (maximum - value) / (maximum - minimum)
+Rate:
+15
 
-After normalization, values closer to 1 are better. If every valid model has the
-same value for one metric, each receives 1.0 because that metric cannot separate
-the models.
+Source Packets:
+12
 
-The overall score is:
+Destination Packets:
+8
 
-  sum of the nine normalized metric scores / 9
+Source Bytes:
+1500
 
-All nine metrics receive equal weight. A missing or invalid required metric is
-not changed to zero. That candidate is marked incomplete and excluded from
-automatic winner selection.
+Destination Bytes:
+800
 
-The highest valid score becomes the recommendation. A tie is resolved by higher
-F1, higher Recall, higher ROC-AUC, lower FPR, lower RAM, lower model size, then
-alphabetical model name. No model type is forced to win.
+Source TTL:
+64
 
+Destination TTL:
+64
 
-======================================================================
-18. DEPLOYING A MODEL
-======================================================================
+Protocol:
+tcp
 
-Training does not automatically replace the active model.
+State:
+CON
 
-1. Open Runs.
-2. Open a completed run.
-3. Review all raw and normalized values.
-4. Select Deploy recommended model.
-5. Confirm the action.
+Expected idea:
+This is intended to look more normal because the values are moderate.
 
-The active artifact stores:
-- Fitted preprocessing pipeline
-- Fitted classifier
-- Model name and type
-- Source run ID
-- Feature schema and defaults
-- Label mapping
-- Metric summary
-- Deployment timestamp
+Important:
+The model may still classify it differently depending on how the pretrained
+model learned from the dataset. Machine learning predictions are not manually
+hardcoded.
 
-The deployed winner can be an individual model, Soft Voting, or Stacking. A new
-deployment marks the previous deployment inactive while preserving its database
-history. If artifact validation or the database update fails, deployment rolls
-back safely where possible.
 
+17. SIMULATION ANOMALY TEST
+---------------------------
 
-======================================================================
-19. MANUAL PREDICTION
-======================================================================
+Try these values:
 
-Open Predict after a model is deployed. The form fields are generated from the
-active artifact, so different datasets can produce different forms.
+Duration:
+0.000001
 
-For one prediction, AlgoGuard displays and saves:
-- Normal or Attack
-- Confidence percentage
-- Active model name
-- Prediction timestamp
-- Prediction latency in milliseconds
-- Whether an alert was created
+Rate:
+5000
 
-Accuracy, Precision, Recall, F1, ROC-AUC, and FPR do not appear as metrics for a
-single prediction. They require a labeled dataset, not one unknown record.
+Source Packets:
+1
 
-When prediction is Attack:
-- The traffic input is saved
-- The prediction is saved
-- One alert is created
-- Attack and alert events are written to System Logs
+Destination Packets:
+1
 
-When prediction is Normal:
-- The traffic input is saved
-- The prediction is saved
-- No attack alert is created
-- A successful Normal event is written to System Logs
+Source Bytes:
+2000
 
+Destination Bytes:
+60
 
-======================================================================
-20. ALERT HISTORY VERSUS SYSTEM LOGS
-======================================================================
+Source TTL:
+254
 
-Alert History contains anomalous predictions. It includes severity, status,
-model, confidence, prediction ID, detection time, and description.
+Destination TTL:
+0
 
-System Logs contain operational and audit events, including:
-- Successful and failed login
-- Logout
-- Upload and validation
-- Preprocessing
-- Each model training start, completion, or failure
-- Metric normalization and recommendation
-- Deployment and replacement
-- Prediction, Attack, Normal, and alert creation
-- Reports and application failures
+Protocol:
+tcp
 
-Logs can be filtered by date, module, status, model, run ID, and search text.
-They are paginated and displayed newest first.
+State:
+REQ
 
+Expected idea:
+This is intended to look more suspicious because the rate is very high, TTL
+values are unusual, and state is REQ.
 
-======================================================================
-21. INCLUDED BIG, BIGGER, AND BIGGEST FILES
-======================================================================
 
-AlgoGuard includes three actual CSV files in the datasets folder:
+18. WHAT HAPPENS IF SIMULATION DETECTS AN ATTACK
+------------------------------------------------
 
-- algoguard_big.csv: 5,000 rows
-- algoguard_bigger.csv: 10,000 rows
-- algoguard_biggest.csv: 20,000 rows
+If the Simulation page predicts Attack:
 
-These files are nested, stratified, non-replacement samples of the labeled
-UNSW-NB15 training partition. The 5,000-row file is contained in the 10,000-row
-file, which is contained in the 20,000-row file. Each file contains 15 traffic
-features plus the final label column. The features are dur, proto, service,
-state, spkts, dpkts, sbytes, dbytes, rate, sttl, dttl, sload, dload, sinpkt, and
-dinpkt. Other source columns, including the identifier and attack_cat, were
-removed to simplify training and prevent identifier noise or direct target
-leakage. The binary target uses Normal and Attack labels.
+1. The result card shows Attack.
+2. The confidence percentage is displayed.
+3. The entered flow values are shown.
+4. The traffic flow is saved in the network_traffic table.
+5. The model result is saved in the prediction table.
+6. An alert record is created in the alert table.
 
-Class distributions:
-- algoguard_big.csv: 1,597 Normal and 3,403 Attack
-- algoguard_bigger.csv: 3,194 Normal and 6,806 Attack
-- algoguard_biggest.csv: 6,388 Normal and 13,612 Attack
+Future improvement:
+Add an Alert History page so admins can review saved alert records directly
+inside the web interface.
 
-Source and attribution:
-The UNSW-NB15 Dataset, UNSW Research
-https://research.unsw.edu.au/projects/unsw-nb15-dataset
 
-Academic work using these files should cite the dataset publications listed by
-UNSW Research.
+19. WHAT HAPPENS IF SIMULATION DETECTS NORMAL
+---------------------------------------------
 
-Upload the files one at a time through the Upload page. Wait for one run to
-finish before selecting the next file. AlgoGuard creates three independent run
-IDs and does not merge their rows or choose a cross-dataset winner.
+If the Simulation page predicts Normal:
 
+1. The result card shows Normal.
+2. The confidence percentage is displayed.
+3. The entered flow values are shown.
+4. The traffic flow and prediction are saved in SQLite.
 
-======================================================================
-22. DATABASE TABLES
-======================================================================
+This means the pretrained model thinks the flow is closer to normal traffic
+than attack traffic.
 
-admin:
-Admin identity, password hash, email, role, and creation time.
 
-training_run:
-One independent CSV upload and its workflow status and recommendation.
+20. WHAT CONFIDENCE MEANS
+-------------------------
 
-detection_model:
-One candidate result, raw metrics, normalized metrics, rank, artifact path, and
-recommendation/deployment state. A successful run has seven linked rows.
+Confidence is the model's estimated certainty.
 
-model_deployment:
-Deployment history and the currently active model reference.
+Example:
 
-network_traffic:
-Manual prediction inputs and their full feature payload.
+Prediction:
+Attack
 
-prediction:
-Class, confidence, model, deployment, timestamp, latency, and alert status.
+Confidence:
+82.50%
 
-alert:
-Attack alert linked to a prediction.
+Meaning:
+The model is 82.50% confident in the predicted class.
 
-report and report_alert:
-Generated report metadata and optional linked alerts.
+Important:
+High confidence does not guarantee the prediction is correct. It only shows
+how confident the model is based on what it learned.
 
-system_log:
-Authentication, dataset, training, deployment, prediction, report, and error
-events with available context.
 
-schema_migration:
-Records additive database upgrades already applied.
+21. WHAT THE RESULTS TABLE MEANS
+--------------------------------
 
+After uploading a dataset, the Results page shows each model.
 
-======================================================================
-23. GENERATED FILES AND GIT
-======================================================================
+Example columns:
 
-These runtime files are intentionally excluded from Git:
-- database/algoguard.sqlite3
-- uploads/*.csv
-- saved_models/run_*/
-- saved_models/deployed_model.joblib
-- reports/*.csv
+Model>>
+Accuracy>>
+Precision>>
+Recall>>
+F1-score>>
+ROC-AUC>>
+False Positive Rate<<
+CPU Usage<<
+RAM Usage<<
+Model Size<<
 
-The .gitkeep and .gitignore files preserve empty runtime directories without
-publishing private datasets, local accounts, or large model artifacts.
+Use F1-score as a good overall metric when normal/anomaly classes are not
+perfectly balanced.
 
+Use False Positive Rate to understand how often normal traffic is wrongly
+flagged as suspicious.
 
-======================================================================
-24. QUALITY ASSURANCE COMMANDS
-======================================================================
 
-Install development tools:
+22. BEST MODEL SELECTION
+------------------------
 
-  python -m pip install -r requirements-dev.txt
+AlgoGuard chooses the best model using:
 
-Run lint:
+1. Higher F1-score
+2. Higher accuracy
+3. Lower false positive rate
+4. Lower processing time
 
-  python -m ruff check app.py migrate.py services tests
+The best model is shown on the Dashboard and Results page.
 
-Run automated tests:
 
-  python -m pytest -q
+23. WHAT FILES ARE CREATED AFTER TRAINING
+-----------------------------------------
 
-The suite covers model architecture, leakage-safe training, normalization,
-included CSV validation, independent uploads, deployment, prediction, alerts, logs,
-legacy reference removal, and Flask page smoke tests.
+After uploading and training, the app can generate:
 
+saved_models/random_forest.joblib
+saved_models/gradient_boosting.joblib
+saved_models/voting_classifier.joblib
+reports/model_report_YYYYMMDDHHMMSS.csv
+database/algoguard.sqlite3
 
-======================================================================
-25. COMMON ERRORS
-======================================================================
+These generated files are ignored by Git so the repository stays clean.
 
-ModuleNotFoundError: No module named 'flask' or 'pandas'
+The SQLite database stores:
 
-Cause: The application is using a Python where dependencies are not installed.
+admin
+    Multiple admin login accounts with hashed passwords.
 
-Fix:
-  .\venv\Scripts\Activate.ps1
-  python -m pip install -r requirements.txt
-  python app.py
+network_traffic
+    Traffic rows created from manual simulation or future dataset capture.
 
-Or use:
-  .\venv\Scripts\python.exe app.py
+detection_model
+    Trained model names, versions, metrics, training time, and model size.
 
+prediction
+    Prediction result, confidence score, timestamp, traffic reference, and
+    model reference.
 
-CSV rejected as one class
+alert
+    Attack/anomaly alerts created from suspicious predictions.
 
-Cause: The last column contains only Normal or only Attack, or the target is not
-the final column.
+report
+    Report metadata connected to the admin who generated the report.
 
-Fix: Verify the final column and include correctly labeled examples from both
-classes.
+report_alert
+    Join table that can connect reports to one or more alert records.
 
+system_log
+    Login, logout, upload, training, and simulation activity records.
 
-Insufficient rows
 
-Cause: A class cannot be preserved in both the training and testing subsets.
+24. HOW TO EXPLAIN THIS IN A PRESENTATION
+-----------------------------------------
 
-Fix: Add more unique, valid examples for the smaller class.
+Short explanation:
 
+AlgoGuard is a lightweight anomaly detection prototype for network traffic.
+It allows users to upload a CSV dataset, automatically preprocesses the data,
+trains three ensemble machine learning models, compares their performance, and
+identifies the best model. It also includes a manual Simulation page where a
+single network flow can be classified as Normal or Attack using pretrained
+model artifacts from artifacts/pretrained.
 
-No active deployment
+If asked if it monitors real traffic:
 
-Cause: Training finished but no administrator deployed the recommendation.
+No. The current version is a simulation prototype. It does not capture live
+network packets yet. It demonstrates the machine learning pipeline using CSV
+datasets and manual flow input.
 
-Fix: Open the run result and deploy the recommended model.
+If asked what happens when an anomaly is detected:
 
+The app displays the anomaly/attack result and confidence score. In Simulation
+Mode, the traffic record, prediction record, and alert record are saved in
+SQLite. In Dataset Mode, anomaly counts and model performance are shown in the
+dashboard and results table. Real-time notifications and a full Alert History
+page are planned future enhancements.
 
-Active artifact missing or mismatched
 
-Cause: saved_models/deployed_model.joblib was moved, deleted, or does not match
-the active database record.
+25. FUTURE IMPROVEMENTS
+-----------------------
 
-Fix: Redeploy a valid recommendation from a completed run.
+Possible future features:
 
+1. Add Alert History page.
+2. Add admin notification for anomalies.
+3. Add downloadable PDF reports.
+4. Add live packet capture using tools such as Scapy or PyShark.
+5. Add retraining from reviewed prediction records.
+6. Add charts for normal vs anomaly counts.
 
-Port 5000 already in use
 
-Fix in PowerShell:
-  $env:ALGOGUARD_PORT = "5001"
-  python app.py
+26. QUICK CHECKLIST BEFORE DEMO
+-------------------------------
 
-Then open http://127.0.0.1:5001.
+Before presenting:
 
+1. Open terminal in the project root.
+2. Activate venv.
+3. Install requirements.
+4. Run python app.py.
+5. Open http://localhost:5000.
+6. Try the Dashboard.
+7. Upload a test CSV.
+8. Check Results.
+9. Try Simulation normal input.
+10. Try Simulation anomaly input.
 
-======================================================================
-26. INTERPRETING RESULTS RESPONSIBLY
-======================================================================
 
-High Accuracy can hide missed attacks when Normal rows dominate. Review Recall,
-F1, ROC-AUC, and FPR together. Resource values depend on the computer, Python
-version, background activity, and dataset size. Compare models measured in the
-same run and environment.
+27. SIMPLEST TEST CSV
+---------------------
 
-An anomaly prediction is a model estimate, not proof of an attack. A capstone
-evaluation should document dataset source, labels, class balance, split method,
-software versions, computer specifications, resource method, and test results.
+If you need a very quick CSV for testing, use this:
 
-AlgoGuard's results should support human analysis. They should not be treated as
-an automatic production security decision without additional validation.
+dur,rate,proto,state,label
+0.10,12,tcp,CON,normal
+0.20,10,udp,CON,normal
+0.15,11,tcp,FIN,normal
+0.12,14,udp,CON,normal
+0.01,5000,tcp,REQ,attack
+0.02,4500,tcp,INT,attack
+0.01,4800,udp,REQ,attack
+0.03,5200,tcp,INT,attack
 
-END OF MANUAL
+Save it as:
+
+quick_test.csv
+
+Then upload it on the Upload page.
+
+
+28. HOW TO CREATE A CSV FILE
+----------------------------
+
+The easiest way to create a CSV file on Windows is with Notepad.
+
+Step 1:
+Open Notepad.
+
+Step 2:
+Paste this sample data:
+
+dur,rate,proto,state,label
+0.10,12,tcp,CON,normal
+0.20,10,udp,CON,normal
+0.15,11,tcp,FIN,normal
+0.12,14,udp,CON,normal
+0.01,5000,tcp,REQ,attack
+0.02,4500,tcp,INT,attack
+0.01,4800,udp,REQ,attack
+0.03,5200,tcp,INT,attack
+
+Step 3:
+Click File > Save As.
+
+Step 4:
+Set "Save as type" to:
+
+All Files
+
+Step 5:
+Name the file:
+
+quick_test.csv
+
+Step 6:
+Save it somewhere easy to find, such as the Desktop.
+
+Step 7:
+Open AlgoGuard, go to the Upload page, and upload quick_test.csv.
+
+Important:
+Make sure the file is named:
+
+quick_test.csv
+
+Not:
+
+quick_test.csv.txt
+
+If Windows hides file extensions, Notepad may accidentally save it as
+quick_test.csv.txt. Choosing "All Files" helps prevent that.
+
+
+29. WHAT THE CSV COLUMNS MEAN
+-----------------------------
+
+This sample CSV has five columns:
+
+dur
+    Short for duration.
+    It represents how long the network flow lasted.
+
+    Example:
+    0.10
+
+    A small value means the flow happened quickly.
+
+rate
+    Represents traffic rate, such as packets per second.
+
+    Example:
+    12
+
+    A moderate value can look normal.
+    A very high value, such as 5000, can look suspicious.
+
+proto
+    Short for protocol.
+    It tells what network protocol was used.
+
+    Example values:
+    tcp
+    udp
+    icmp
+
+state
+    Represents the connection state.
+
+    Example values:
+    CON
+    FIN
+    REQ
+    INT
+
+    CON or FIN can look more normal.
+    REQ or INT can sometimes appear in suspicious traffic depending on the
+    dataset.
+
+label
+    This is the target label.
+    It tells the model the correct answer for that row.
+
+    Example values:
+    normal
+    attack
+
+    Important:
+    In AlgoGuard, the label column must be the last column.
+
+
+30. WHAT EACH SAMPLE ROW MEANS
+------------------------------
+
+Header row:
+
+dur,rate,proto,state,label
+
+This row names the columns. It is not a traffic record.
+
+Normal row example:
+
+0.10,12,tcp,CON,normal
+
+Meaning:
+
+dur = 0.10
+    The traffic flow lasted 0.10 seconds.
+
+rate = 12
+    The traffic rate is moderate.
+
+proto = tcp
+    The flow used TCP.
+
+state = CON
+    The connection state is CON.
+
+label = normal
+    This row is marked as normal traffic.
+
+Attack row example:
+
+0.01,5000,tcp,REQ,attack
+
+Meaning:
+
+dur = 0.01
+    The traffic flow was very short.
+
+rate = 5000
+    The traffic rate is very high.
+
+proto = tcp
+    The flow used TCP.
+
+state = REQ
+    The connection state is REQ.
+
+label = attack
+    This row is marked as suspicious/attack traffic.
+
+
+31. HOW TO READ THE SAMPLE CSV
+------------------------------
+
+This row:
+
+0.20,10,udp,CON,normal
+
+Can be read as:
+
+"A UDP network flow lasted 0.20 seconds, had a traffic rate of 10, had a CON
+state, and is labeled as normal."
+
+This row:
+
+0.03,5200,tcp,INT,attack
+
+Can be read as:
+
+"A TCP network flow lasted 0.03 seconds, had a very high traffic rate of 5200,
+had an INT state, and is labeled as attack."
+
+
+32. WHY THE CSV NEEDS NORMAL AND ATTACK ROWS
+--------------------------------------------
+
+The model learns by comparing examples.
+
+Normal rows teach the model:
+
+"This is what safe traffic can look like."
+
+Attack rows teach the model:
+
+"This is what suspicious traffic can look like."
+
+If the dataset only has normal rows, the model cannot learn what attack traffic
+looks like.
+
+If the dataset only has attack rows, the model cannot learn what normal traffic
+looks like.
+
+That is why a good training CSV needs both normal and attack rows.
+
+
+33. FINAL REMINDER
+------------------
+
+AlgoGuard is not trying to be a complete enterprise IDS yet.
+
+It is a capstone/research prototype that demonstrates:
+
+- data upload
+- preprocessing
+- feature encoding
+- feature scaling
+- model training
+- model comparison
+- anomaly detection
+- simulation prediction
+- dashboard/report display
