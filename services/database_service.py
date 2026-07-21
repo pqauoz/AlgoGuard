@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 
 from werkzeug.security import generate_password_hash
 
+from services.model_registry import MODEL_WORKFLOW_VERSION
+
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 DATABASE_FOLDER = os.path.join(BASE_DIR, "database")
@@ -624,7 +626,7 @@ def list_training_runs(page=1, per_page=20):
     }
 
 
-def insert_model_result(run_id, model_result, version="six-model-v2"):
+def insert_model_result(run_id, model_result, version=MODEL_WORKFLOW_VERSION):
     """Persist raw metrics, normalized metrics, score, and artifact metadata."""
     normalized = model_result.get("normalized_metrics") or {}
     fpr = _safe_float(model_result.get("false_positive_rate"))
@@ -683,7 +685,7 @@ def insert_model_result(run_id, model_result, version="six-model-v2"):
 
 
 def save_training_results(run_id, model_results, best_model):
-    """Save every result row and connect the recommended model to the run."""
+    """Save all evaluations and retain the top individual comparison result."""
     model_ids = {}
     for result in model_results:
         result["is_recommended"] = bool(
@@ -718,8 +720,10 @@ def list_model_results(run_id):
     with get_connection() as connection:
         rows = connection.execute(
             """
-            SELECT * FROM detection_model
-            WHERE run_id = ?
+            SELECT dm.*, tr.training_status AS run_training_status
+            FROM detection_model dm
+            JOIN training_run tr ON tr.run_id = dm.run_id
+            WHERE dm.run_id = ?
             ORDER BY CASE WHEN rank IS NULL THEN 1 ELSE 0 END, rank, model_name
             """,
             (run_id,),
@@ -732,7 +736,8 @@ def get_model_result(model_id):
     with get_connection() as connection:
         row = connection.execute(
             """
-            SELECT dm.*, tr.filename, tr.deployment_status
+            SELECT dm.*, tr.filename, tr.deployment_status,
+                   tr.training_status AS run_training_status
             FROM detection_model dm
             LEFT JOIN training_run tr ON tr.run_id = dm.run_id
             WHERE dm.model_id = ?

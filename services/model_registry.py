@@ -14,6 +14,7 @@ from sklearn.neighbors import KNeighborsClassifier
 
 
 RANDOM_STATE = 42
+MODEL_WORKFLOW_VERSION = "stacking-five-v3"
 
 
 class ModelSpecification(TypedDict):
@@ -35,6 +36,8 @@ MODEL_IDS: OrderedDict[str, str] = OrderedDict(
 
 INDIVIDUAL_MODEL_IDS: tuple[str, ...] = tuple(list(MODEL_IDS.keys())[:5])
 MODEL_NAMES: tuple[str, ...] = tuple(MODEL_IDS.values())
+STACKING_MODEL_ID = "stacking"
+STACKING_MODEL_NAME = MODEL_IDS[STACKING_MODEL_ID]
 
 
 def build_individual_estimators(n_neighbors: int = 5) -> OrderedDict[str, BaseEstimator]:

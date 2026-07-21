@@ -7,6 +7,7 @@
 {%- endmacro %}
 
 {% block content %}
+{% set individual_results = model_results|selectattr('model_type', 'equalto', 'individual')|list %}
 <section class="dashboard-header compact">
     <div>
         <p class="eyebrow">Evaluation Results / Run #{{ training_run.run_id }}</p>
@@ -21,9 +22,9 @@
 
 <section class="metric-grid">
     <div class="metric-card success">
-        <span class="metric-label">Best Model</span>
+        <span class="metric-label">Top Individual</span>
         <strong>{{ training_run.recommended_model_name or 'Pending' }}</strong>
-        <small>{% if training_run.recommended_score is not none %}Score {{ '%.6f'|format(training_run.recommended_score) }}{% else %}No eligible recommendation{% endif %}</small>
+        <small>{% if training_run.recommended_score is not none %}Comparison score {{ '%.6f'|format(training_run.recommended_score) }}{% else %}No valid comparison result{% endif %}</small>
     </div>
     <div class="metric-card">
         <span class="metric-label">Normal Traffic</span>
@@ -46,27 +47,36 @@
 <div class="inline-error mb-3"><i class="bi bi-x-octagon-fill"></i><div><strong>Run did not complete</strong><span>{{ training_run.error_message }}</span></div></div>
 {% endif %}
 
-{% if training_run.recommended_model_name %}
-{% set recommended = model_results|selectattr('is_recommended', 'equalto', 1)|first %}
 <section class="panel recommendation-legacy">
     <div>
-        <p class="eyebrow">Recommended Model</p>
-        <h2>{{ training_run.recommended_model_name }}</h2>
-        <p class="header-copy">Selected by the average normalized score across all nine required evaluation metrics.</p>
+        <p class="eyebrow">Final Deployment Framework</p>
+        <h2>{{ stacking_model.model_name if stacking_model else 'Stacking Unavailable' }}</h2>
+        <p class="header-copy">Stacking combines the five base learners through Logistic Regression. It is evaluated separately and is the only deployable model.</p>
+        <small class="gate-requirements">
+            Required: Accuracy &ge; {{ '%.2f'|format(stacking_quality_thresholds.accuracy) }}%,
+            F1-score &ge; {{ '%.2f'|format(stacking_quality_thresholds.f1_score) }}%,
+            ROC-AUC &ge; {{ '%.2f'|format(stacking_quality_thresholds.roc_auc) }}%.
+        </small>
     </div>
-    {% if recommended %}
-        {% if active_deployment and active_deployment.model_id == recommended.model_id %}
+    <div class="deployment-gate-actions">
+    {% if stacking_model %}
+        {% if active_deployment and active_deployment.model_id == stacking_model.model_id %}
         <span class="status-pill active"><i class="bi bi-broadcast-pin"></i> Active Deployment</span>
-        {% elif recommended.model_name not in supported_model_names %}
-        <span class="status-pill"><i class="bi bi-cloud-slash"></i> Legacy Result</span>
-        {% else %}
-        <form method="post" action="{{ url_for('deploy_training_model', run_id=training_run.run_id, model_id=recommended.model_id) }}" onsubmit="return confirm('Deploy {{ recommended.model_name }} as the active prediction model?');">
-            <button class="btn btn-accent" type="submit"><i class="bi bi-cloud-arrow-up"></i> Deploy Best Model</button>
+        {% elif stacking_eligible %}
+        <span class="status-pill active"><i class="bi bi-shield-check"></i> Quality Gate Passed</span>
+        <form method="post" action="{{ url_for('deploy_training_model', run_id=training_run.run_id, model_id=stacking_model.model_id) }}" onsubmit="return confirm('Deploy this evaluated Stacking Ensemble as the active prediction model?');">
+            <button class="btn btn-accent" type="submit"><i class="bi bi-cloud-arrow-up"></i> Deploy Stacking</button>
         </form>
+        {% else %}
+        <span class="status-badge warning"><i class="bi bi-shield-exclamation"></i> Deployment Blocked</span>
+        <small>{{ stacking_eligibility_reason }}</small>
         {% endif %}
+    {% else %}
+        <span class="status-badge warning"><i class="bi bi-cloud-slash"></i> Deployment Blocked</span>
+        <small>{{ stacking_eligibility_reason }}</small>
     {% endif %}
+    </div>
 </section>
-{% endif %}
 
 <section class="panel">
     <div class="panel-heading">
@@ -100,10 +110,11 @@
             <tbody>
                 {% for result in model_results %}
                 <tr class="{% if result.is_recommended %}best-row{% elif result.evaluation_status != 'completed' %}failed-row{% endif %}">
-                    <td>{{ result.rank or '-' }}</td>
+                    <td>{% if stacking_model and result.model_id == stacking_model.model_id %}Final{% else %}{{ result.rank or '-' }}{% endif %}</td>
                     <td>
                         <strong>{{ result.model_name }}</strong>
-                        {% if result.is_recommended %}<span class="best-badge">Best</span>{% endif %}
+                        {% if result.is_recommended %}<span class="best-badge">Top Individual</span>{% endif %}
+                        {% if stacking_model and result.model_id == stacking_model.model_id %}<span class="status-pill active">Deployment Model</span>{% endif %}
                         {% if result.error_message %}<small class="table-error">{{ result.error_message }}</small>{% endif %}
                     </td>
                     <td>{{ result.model_type }}</td>
@@ -116,7 +127,7 @@
                     <td>{{ metric(result.cpu_usage, ' s') }}</td>
                     <td>{{ metric(result.ram_usage, ' MB') }}</td>
                     <td>{{ metric(result.model_size, ' MB') }}</td>
-                    <td><strong>{{ '%.6f'|format(result.overall_score) if result.overall_score is not none else 'Excluded' }}</strong></td>
+                    <td><strong>{% if stacking_model and result.model_id == stacking_model.model_id %}Not ranked{% elif result.overall_score is not none %}{{ '%.6f'|format(result.overall_score) }}{% else %}Excluded{% endif %}</strong></td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -127,14 +138,14 @@
     {% endif %}
 </section>
 
-{% if model_results %}
+{% if individual_results %}
 <details class="panel normalized-panel">
-    <summary><span><small class="eyebrow">Scoring Detail</small><strong>Normalized Metric Values</strong></span><i class="bi bi-chevron-down"></i></summary>
+    <summary><span><small class="eyebrow">Research Comparison</small><strong>Individual Ranking Detail</strong></span><i class="bi bi-chevron-down"></i></summary>
     <div class="table-responsive">
         <table class="table table-dark table-hover align-middle results-table mb-0">
             <thead><tr><th>Model</th><th>Accuracy</th><th>Precision</th><th>Recall</th><th>F1</th><th>ROC-AUC</th><th>FPR</th><th>CPU</th><th>RAM</th><th>Size</th><th>Average</th></tr></thead>
             <tbody>
-                {% for result in model_results %}
+                {% for result in individual_results %}
                 <tr><td><strong>{{ result.model_name }}</strong></td><td>{{ metric(result.normalized_accuracy) }}</td><td>{{ metric(result.normalized_precision) }}</td><td>{{ metric(result.normalized_recall) }}</td><td>{{ metric(result.normalized_f1) }}</td><td>{{ metric(result.normalized_roc_auc) }}</td><td>{{ metric(result.normalized_fpr) }}</td><td>{{ metric(result.normalized_cpu) }}</td><td>{{ metric(result.normalized_ram) }}</td><td>{{ metric(result.normalized_model_size) }}</td><td><strong>{{ metric(result.overall_score) }}</strong></td></tr>
                 {% endfor %}
             </tbody>

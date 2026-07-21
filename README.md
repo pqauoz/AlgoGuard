@@ -1,6 +1,6 @@
 # AlgoGuard
 
-AlgoGuard is a local Flask application for binary network traffic classification. One uploaded CSV creates one independent training run, evaluates exactly six Scikit-learn approaches, recommends a winner using nine normalized metrics, and lets an administrator explicitly deploy that model for manual single-record prediction.
+AlgoGuard is a local Flask application for binary network traffic classification. One uploaded CSV creates one independent training run, trains five individual Scikit-learn models plus a Stacking Ensemble, ranks the individual models for research comparison, and lets an administrator deploy only an evaluated Stacking model for manual single-record prediction.
 
 AlgoGuard does not capture live packets, monitor a network continuously, or block traffic. It is an operational research prototype for prepared CSV data and manual prediction.
 
@@ -15,13 +15,15 @@ Every valid upload trains these exact candidates:
 5. Naive Bayes
 6. Stacking Ensemble using all five base estimators and Logistic Regression as the final estimator
 
-Each candidate receives its own unfitted estimator instances. All candidates use the same stratified train/test split. A Scikit-learn pipeline fits missing-value handling, scaling, and categorical encoding only on training data, then saves preprocessing and classification together in the Joblib artifact.
+Each individual model and the Stacking Ensemble receive fresh, unfitted estimator instances. Stacking uses all five model families as base learners and Logistic Regression as its final estimator. All evaluations use the same stratified train/test split. A Scikit-learn pipeline fits missing-value handling, scaling, and categorical encoding only on training data, then saves preprocessing and classification together in the Joblib artifact.
 
 ## Ranking
 
 Higher is better for Accuracy, Precision, Recall, F1-score, and ROC-AUC. Lower is better for False Positive Rate, process CPU time, peak process RAM increase, and complete artifact size.
 
-AlgoGuard min-max normalizes all nine metrics across valid candidates. The overall score is their equal arithmetic average. Invalid or incomplete candidates are excluded. Ties are resolved by F1, Recall, ROC-AUC, FPR, RAM, model size, then model name.
+AlgoGuard min-max normalizes all nine metrics across the five valid individual models. The overall score is their equal arithmetic average. Invalid or incomplete individual results are excluded. Ties are resolved by F1, Recall, ROC-AUC, FPR, RAM, model size, then model name.
+
+This ranking is for research comparison only and never chooses the deployed model. Stacking is evaluated separately on raw classification metrics and must pass the deployment quality gate.
 
 ## Main Workflow
 
@@ -29,11 +31,12 @@ AlgoGuard min-max normalizes all nine metrics across valid candidates. The overa
 CSV upload
   -> validation and independent training-run record
   -> stratified split
-  -> six leakage-safe pipelines
-  -> raw and normalized metrics
-  -> recommendation
-  -> administrator deployment
-  -> manual prediction using only the active artifact
+  -> five leakage-safe individual pipelines
+  -> individual-model comparison ranking
+  -> Stacking training with the five base learners
+  -> Stacking evaluation and quality gate
+  -> administrator deploys Stacking
+  -> manual prediction using only the active Stacking artifact
   -> prediction, optional alert, and system logs
 ```
 
@@ -160,13 +163,17 @@ Three ready-to-upload CSV files are included in `datasets/`:
 
 The files are nested, stratified, non-replacement samples of the labeled UNSW-NB15 training partition. Each file uses the same 15 input features: `dur`, `proto`, `service`, `state`, `spkts`, `dpkts`, `sbytes`, `dbytes`, `rate`, `sttl`, `dttl`, `sload`, `dload`, `sinpkt`, and `dinpkt`. The final binary `label` uses `Normal` and `Attack`. Other source columns, including the identifier and `attack_cat`, were removed to keep training practical and prevent identifier noise or direct target leakage.
 
-AlgoGuard does not generate or combine these files at runtime. Open Upload and select each CSV manually, one at a time. Each upload creates a separate run with its own six model results and recommendation.
+AlgoGuard does not generate or combine these files at runtime. Open Upload and select each CSV manually, one at a time. Each upload creates a separate run with six evaluation rows, a ranked five-model research comparison, and one Stacking deployment candidate.
 
 Dataset source and attribution: [The UNSW-NB15 Dataset, UNSW Research](https://research.unsw.edu.au/projects/unsw-nb15-dataset). Academic work using these files should cite the dataset publications listed by UNSW.
 
 ## Deploy and Predict
 
-Open a completed run, review all six rows, then select **Deploy recommended model**. Training never replaces the active model automatically. Deployment saves the pipeline, model identity, source run, metric summary, and deployment timestamp to `saved_models/deployed_model.joblib` and records the active deployment in SQLite.
+Open a completed run and review all six evaluation rows. The five individual models are comparison results only. Select **Deploy Stacking** only after its evaluation passes the quality gate. Training never replaces the active model automatically. Deployment saves the Stacking pipeline, model identity, source run, metric summary, and deployment timestamp to `saved_models/deployed_model.joblib` and records the active deployment in SQLite.
+
+The default minimums are Accuracy 70%, F1-score 70%, and ROC-AUC 70%. They can be configured before startup with `ALGOGUARD_MIN_STACKING_ACCURACY`, `ALGOGUARD_MIN_STACKING_F1`, and `ALGOGUARD_MIN_STACKING_ROC_AUC`. Values are percentages from 0 to 100.
+
+Artifacts from earlier deployment workflows are intentionally treated as legacy. After upgrading, upload and train a new dataset to create a `stacking-five-v3` artifact; an older individual or Stacking artifact cannot be reactivated under the current policy.
 
 The Prediction page builds its fields from the active artifact's saved feature schema. A prediction stores Normal or Attack, confidence, model name, timestamp, latency, and alert status. Attack creates an alert and audit events; Normal does not create an attack alert.
 
@@ -190,9 +197,9 @@ python -m pytest -q
 
 Invalid CSV: confirm the file is CSV, the target is last, exactly two target classes exist, and both classes have enough rows.
 
-No active deployment: finish a valid training run and explicitly deploy its recommended model.
+No active deployment: finish a valid training run, confirm Stacking passed the quality gate, and explicitly deploy Stacking.
 
-Missing artifact: the database record and `saved_models/deployed_model.joblib` must agree. Redeploy a valid recommended model from Training Runs.
+Missing artifact: the database record and `saved_models/deployed_model.joblib` must agree. Redeploy an eligible Stacking result from Training Runs.
 
 Forgot local password: do not delete a database containing needed records. For a disposable new local installation only, recreate the database and seed credentials. Production-style password reset administration is outside this prototype's scope.
 

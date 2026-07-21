@@ -38,8 +38,13 @@ from services.database_service import (
     update_training_run,
     utc_now,
 )
-from services.deployment_service import DeploymentError, deploy_model
-from services.model_registry import MODEL_IDS, MODEL_NAMES
+from services.deployment_service import (
+    STACKING_QUALITY_THRESHOLDS,
+    DeploymentError,
+    deploy_model,
+    stacking_deployment_eligibility,
+)
+from services.model_registry import MODEL_IDS, STACKING_MODEL_NAME
 from services.preprocessing_service import prepare_dataset
 from services.simulation_service import (
     SimulationServiceError,
@@ -466,11 +471,26 @@ def manage_admins():
 def dashboard():
     logs = list_system_logs(page=1, per_page=5)
     latest_run = get_latest_training_run()
+    active_deployment = get_active_deployment()
+    active_stacking_deployment = (
+        active_deployment
+        if active_deployment and active_deployment.get("model_name") == STACKING_MODEL_NAME
+        else None
+    )
+    model_results = list_model_results(latest_run["run_id"]) if latest_run else []
+    stacking_model = next(
+        (model for model in model_results if model.get("model_name") == STACKING_MODEL_NAME),
+        None,
+    )
+    stacking_eligible, stacking_eligibility_reason = stacking_deployment_eligibility(stacking_model)
     return render_template(
         "dashboard.html",
         latest_run=latest_run,
-        model_results=list_model_results(latest_run["run_id"]) if latest_run else [],
-        active_deployment=get_active_deployment(),
+        model_results=model_results,
+        stacking_model=stacking_model,
+        stacking_eligible=stacking_eligible,
+        stacking_eligibility_reason=stacking_eligibility_reason,
+        active_deployment=active_stacking_deployment,
         latest_prediction=get_latest_prediction(),
         latest_alerts=list_alerts(limit=5),
         latest_logs=logs["items"],
@@ -711,8 +731,8 @@ def upload_dataset():
             progress_token,
             admin_id,
             90,
-            "Ranking models",
-            "Comparing all valid candidates across nine normalized metrics.",
+            "Ranking individual models",
+            "Comparing the five individual models across nine normalized metrics.",
         )
         _log(
             "Training",
@@ -743,7 +763,10 @@ def upload_dataset():
 
         if results["best_model"]:
             flash(
-                f"Run {run_id} completed. {results['best_model']['model_name']} is recommended.",
+                (
+                    f"Run {run_id} completed. {results['best_model']['model_name']} "
+                    "leads the individual comparison. Review Stacking for deployment."
+                ),
                 "success",
             )
         else:
@@ -813,12 +836,21 @@ def training_results(run_id):
     if not training_run:
         flash("Training run not found.", "danger")
         return redirect(url_for("training_history"))
+    model_results = list_model_results(run_id)
+    stacking_model = next(
+        (model for model in model_results if model.get("model_name") == STACKING_MODEL_NAME),
+        None,
+    )
+    stacking_eligible, stacking_eligibility_reason = stacking_deployment_eligibility(stacking_model)
     return render_template(
         "results.html",
         training_run=training_run,
-        model_results=list_model_results(run_id),
+        model_results=model_results,
+        stacking_model=stacking_model,
+        stacking_eligible=stacking_eligible,
+        stacking_eligibility_reason=stacking_eligibility_reason,
+        stacking_quality_thresholds=STACKING_QUALITY_THRESHOLDS,
         active_deployment=get_active_deployment(),
-        supported_model_names=MODEL_NAMES,
     )
 
 
@@ -941,6 +973,6 @@ initialize_database()
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("ALGOGUARD_PORT", 5000))
+    port = int(os.environ.get("ALGOGUARD_PORT", "5000"))
     debug = os.environ.get("FLASK_DEBUG", "1") == "1"
     app.run(debug=debug, host="0.0.0.0", port=port, use_reloader=False)

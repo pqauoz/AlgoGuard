@@ -1,11 +1,25 @@
+import math
 import os
 import shutil
+import threading
 from datetime import datetime, timezone
+from uuid import uuid4
 
 import joblib
+from sklearn.ensemble import StackingClassifier
+from sklearn.exceptions import NotFittedError
+from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import Pipeline
+from sklearn.utils.validation import check_is_fitted
 
 from services.database_service import get_active_deployment, get_model_result, record_deployment
-from services.model_registry import MODEL_NAMES
+from services.model_registry import (
+    INDIVIDUAL_MODEL_IDS,
+    MODEL_WORKFLOW_VERSION,
+    STACKING_MODEL_ID,
+    STACKING_MODEL_NAME,
+    build_individual_estimators,
+)
 
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -13,25 +27,143 @@ DEFAULT_ACTIVE_MODEL_PATH = os.path.join(BASE_DIR, "saved_models", "deployed_mod
 ACTIVE_MODEL_PATH = os.path.abspath(
     os.environ.get("ALGOGUARD_DEPLOYED_MODEL_PATH", DEFAULT_ACTIVE_MODEL_PATH)
 )
+_DEPLOYMENT_LOCK = threading.Lock()
 
 
 class DeploymentError(RuntimeError):
     pass
 
 
-def deploy_model(model_id, admin_id):
-    """Atomically promote one completed recommendation to active deployment."""
+def _quality_threshold(environment_name: str, default: float) -> float:
+    """Read one percentage threshold while keeping configuration safe."""
+    fallback = min(max(default, 0.0), 100.0)
+    raw_value = os.environ.get(environment_name)
+    if raw_value is None:
+        return fallback
+
+    try:
+        value = float(raw_value)
+    except ValueError:
+        return fallback
+    if not math.isfinite(value):
+        return fallback
+    return min(max(value, 0.0), 100.0)
+
+
+STACKING_QUALITY_THRESHOLDS = {
+    "accuracy": _quality_threshold("ALGOGUARD_MIN_STACKING_ACCURACY", 70.0),
+    "f1_score": _quality_threshold("ALGOGUARD_MIN_STACKING_F1", 70.0),
+    "roc_auc": _quality_threshold("ALGOGUARD_MIN_STACKING_ROC_AUC", 70.0),
+}
+
+STACKING_THRESHOLD_LABELS = {
+    "accuracy": "Accuracy",
+    "f1_score": "F1-score",
+    "roc_auc": "ROC-AUC",
+}
+
+
+def stacking_deployment_eligibility(model):
+    """Return whether one persisted Stacking evaluation may be deployed."""
+    if not model:
+        return False, "The Stacking evaluation is unavailable."
+    if model.get("model_name") != STACKING_MODEL_NAME:
+        return False, "Only the evaluated Stacking Ensemble can be deployed."
+    if model.get("version") != MODEL_WORKFLOW_VERSION:
+        return False, "This Stacking result uses a legacy workflow. Train a new run first."
+    if model.get("run_training_status") != "completed":
+        return False, "The training run must complete successfully before deployment."
+    if model.get("evaluation_status") != "completed":
+        return False, "Stacking must complete training and evaluation before deployment."
+
+    failures = []
+    for metric_name, minimum in STACKING_QUALITY_THRESHOLDS.items():
+        value = model.get(metric_name)
+        if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+            failures.append(f"{STACKING_THRESHOLD_LABELS[metric_name]} is unavailable")
+        elif float(value) < minimum:
+            failures.append(
+                f"{STACKING_THRESHOLD_LABELS[metric_name]} {float(value):.2f}% "
+                f"is below {minimum:.2f}%"
+            )
+
+    if failures:
+        return False, "Quality gate failed: " + "; ".join(failures) + "."
+    return True, "Stacking passed every deployment quality requirement."
+
+
+def _validate_stacking_artifact(artifact):
+    """Verify that an artifact implements the current five-model stack."""
+    if not isinstance(artifact, dict):
+        raise DeploymentError("The Stacking artifact has an invalid format.")
+    if (
+        artifact.get("model_id") != STACKING_MODEL_ID
+        or artifact.get("model_name") != STACKING_MODEL_NAME
+    ):
+        raise DeploymentError("The artifact is not the current Stacking model.")
+    if artifact.get("workflow_version") != MODEL_WORKFLOW_VERSION:
+        raise DeploymentError("The Stacking artifact uses a legacy workflow version.")
+
+    pipeline = artifact.get("pipeline")
+    if not isinstance(pipeline, Pipeline):
+        raise DeploymentError("The artifact does not contain a Scikit-learn pipeline.")
+    classifier = pipeline.named_steps.get("classifier")
+    if not isinstance(classifier, StackingClassifier):
+        raise DeploymentError("The artifact does not contain a Stacking classifier.")
+
+    classifier_parameters = classifier.get_params(deep=False)
+    estimator_configuration = classifier_parameters.get("estimators")
+    if not isinstance(estimator_configuration, (list, tuple)):
+        raise DeploymentError("The Stacking base-model configuration is invalid.")
+    try:
+        configured_estimators = dict(estimator_configuration)
+    except (TypeError, ValueError) as error:
+        raise DeploymentError("The Stacking base-model configuration is invalid.") from error
+    expected_estimators = build_individual_estimators()
+    if tuple(configured_estimators) != INDIVIDUAL_MODEL_IDS:
+        raise DeploymentError("The Stacking artifact does not contain all five base models.")
+    if any(
+        not isinstance(configured_estimators[model_id], type(expected_estimator))
+        for model_id, expected_estimator in expected_estimators.items()
+    ):
+        raise DeploymentError("The Stacking artifact contains an unexpected base model type.")
+    if not isinstance(classifier_parameters.get("final_estimator"), LogisticRegression):
+        raise DeploymentError("The Stacking artifact does not use Logistic Regression.")
+    if classifier_parameters.get("stack_method") != "predict_proba":
+        raise DeploymentError("The Stacking artifact does not combine probabilities.")
+
+    try:
+        check_is_fitted(classifier, attributes=("estimators_", "final_estimator_"))
+    except NotFittedError as error:
+        raise DeploymentError("The Stacking artifact is not fitted.") from error
+    fitted_estimators = getattr(classifier, "estimators_", None)
+    if not isinstance(fitted_estimators, (list, tuple)) or len(fitted_estimators) != len(
+        INDIVIDUAL_MODEL_IDS
+    ):
+        raise DeploymentError("The fitted Stacking artifact is missing a base model.")
+    fitted_final_estimator = getattr(classifier, "final_estimator_", None)
+    if not isinstance(fitted_final_estimator, LogisticRegression):
+        raise DeploymentError("The fitted Stacking meta-learner is invalid.")
+
+
+def _remove_temporary_file(path):
+    """Best-effort cleanup that never hides the deployment outcome."""
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
+    except OSError:
+        pass
+
+
+def _deploy_model_unlocked(model_id, admin_id):
+    """Promote one model while the process-level deployment lock is held."""
     model = get_model_result(model_id)
     if not model:
         raise DeploymentError("The selected model result does not exist.")
-    if model.get("model_name") not in MODEL_NAMES:
-        raise DeploymentError(
-            "This legacy model is no longer supported. Train a new run before deploying."
-        )
-    if model.get("evaluation_status") != "completed":
-        raise DeploymentError("Only a completed model evaluation can be deployed.")
-    if not model.get("is_recommended"):
-        raise DeploymentError("Only the recommended winner for a run can be deployed.")
+    eligible, reason = stacking_deployment_eligibility(model)
+    if not eligible:
+        raise DeploymentError(reason)
 
     source_path = model.get("artifact_path")
     if not source_path or not os.path.exists(source_path):
@@ -43,6 +175,7 @@ def deploy_model(model_id, admin_id):
         raise DeploymentError(
             f"The selected model artifact could not be loaded: {error}"
         ) from error
+    _validate_stacking_artifact(artifact)
 
     metric_summary = {
         "accuracy": model.get("accuracy"),
@@ -64,23 +197,31 @@ def deploy_model(model_id, admin_id):
     artifact["deployment_timestamp"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
     os.makedirs(os.path.dirname(ACTIVE_MODEL_PATH), exist_ok=True)
-    temporary_path = f"{ACTIVE_MODEL_PATH}.tmp"
-    backup_path = f"{ACTIVE_MODEL_PATH}.backup"
+    operation_id = uuid4().hex
+    temporary_path = f"{ACTIVE_MODEL_PATH}.{operation_id}.tmp"
+    backup_path = f"{ACTIVE_MODEL_PATH}.{operation_id}.backup"
 
     try:
         joblib.dump(artifact, temporary_path)
-        joblib.load(temporary_path)
+        staged_artifact = joblib.load(temporary_path)
+        _validate_stacking_artifact(staged_artifact)
+    except DeploymentError:
+        _remove_temporary_file(temporary_path)
+        raise
     except Exception as error:
-        if os.path.exists(temporary_path):
-            os.remove(temporary_path)
+        _remove_temporary_file(temporary_path)
         raise DeploymentError(f"Deployment artifact validation failed: {error}") from error
 
     had_active_file = os.path.exists(ACTIVE_MODEL_PATH)
-    if had_active_file:
-        shutil.copy2(ACTIVE_MODEL_PATH, backup_path)
+    backup_created = False
+    active_replaced = False
 
     try:
+        if had_active_file:
+            shutil.copy2(ACTIVE_MODEL_PATH, backup_path)
+            backup_created = True
         os.replace(temporary_path, ACTIVE_MODEL_PATH)
+        active_replaced = True
         deployment = record_deployment(
             model["model_id"],
             model["run_id"],
@@ -88,28 +229,41 @@ def deploy_model(model_id, admin_id):
             ACTIVE_MODEL_PATH,
         )
     except Exception as error:
-        if os.path.exists(backup_path):
-            os.replace(backup_path, ACTIVE_MODEL_PATH)
-        elif not had_active_file and os.path.exists(ACTIVE_MODEL_PATH):
-            os.remove(ACTIVE_MODEL_PATH)
-        raise DeploymentError(f"Model deployment failed: {error}") from error
+        rollback_error = None
+        try:
+            if active_replaced:
+                if backup_created:
+                    os.replace(backup_path, ACTIVE_MODEL_PATH)
+                elif not had_active_file:
+                    _remove_temporary_file(ACTIVE_MODEL_PATH)
+        except OSError as restore_error:
+            rollback_error = restore_error
+
+        message = f"Model deployment failed: {error}"
+        if rollback_error:
+            message += f" Previous artifact restoration also failed: {rollback_error}"
+        raise DeploymentError(message) from error
     finally:
-        if os.path.exists(temporary_path):
-            os.remove(temporary_path)
-        if os.path.exists(backup_path):
-            os.remove(backup_path)
+        _remove_temporary_file(temporary_path)
+        _remove_temporary_file(backup_path)
 
     return {"model": model, "deployment": deployment, "artifact_path": ACTIVE_MODEL_PATH}
+
+
+def deploy_model(model_id, admin_id):
+    """Atomically deploy one eligible Stacking model within this process."""
+    with _DEPLOYMENT_LOCK:
+        return _deploy_model_unlocked(model_id, admin_id)
 
 
 def load_active_artifact():
     """Load only the model referenced by the active deployment record."""
     deployment = get_active_deployment()
     if not deployment:
-        raise DeploymentError("No model has been deployed. Deploy a recommended model first.")
-    if deployment.get("model_name") not in MODEL_NAMES:
+        raise DeploymentError("No model has been deployed. Deploy an eligible Stacking run first.")
+    if deployment.get("model_name") != STACKING_MODEL_NAME:
         raise DeploymentError(
-            "The active deployment uses a removed model. Deploy a model from a new run."
+            "The active deployment is not Stacking. Deploy an eligible Stacking run."
         )
 
     artifact_path = deployment.get("artifact_path") or ACTIVE_MODEL_PATH
@@ -121,6 +275,7 @@ def load_active_artifact():
     except Exception as error:
         raise DeploymentError(f"The active model could not be loaded: {error}") from error
 
+    _validate_stacking_artifact(artifact)
     if artifact.get("database_model_id") != deployment.get("model_id"):
         raise DeploymentError("The active artifact does not match the deployment record.")
     return artifact, deployment

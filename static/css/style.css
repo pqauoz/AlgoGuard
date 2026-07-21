@@ -134,6 +134,29 @@
     display: block;
 }
 
+.deployment-gate-actions {
+    display: grid;
+    justify-items: end;
+    gap: 0.55rem;
+    max-width: 430px;
+    color: var(--muted);
+    text-align: right;
+}
+
+.gate-requirements {
+    display: block;
+    margin-top: 0.45rem;
+    color: var(--muted);
+}
+
+@media (max-width: 720px) {
+    .deployment-gate-actions {
+        justify-items: start;
+        max-width: none;
+        text-align: left;
+    }
+}
+
 .inline-error span {
     margin-top: 0.12rem;
     font-size: 0.75rem;

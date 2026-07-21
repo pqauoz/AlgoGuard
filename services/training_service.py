@@ -11,7 +11,11 @@ from services.evaluation_service import (
     rank_model_results,
 )
 from services.evaluation_service import calculate_metrics
-from services.model_registry import build_model_candidates, safe_model_filename
+from services.model_registry import (
+    MODEL_WORKFLOW_VERSION,
+    build_model_candidates,
+    safe_model_filename,
+)
 from services.preprocessing_service import build_feature_preprocessor
 from services.resource_service import ProcessResourceMonitor
 
@@ -57,6 +61,7 @@ def _artifact_payload(
 ):
     return {
         "artifact_version": 2,
+        "workflow_version": MODEL_WORKFLOW_VERSION,
         "pipeline": pipeline,
         "model_id": model_id,
         "model_name": model_name,
@@ -217,13 +222,28 @@ def train_and_compare_models(
             result["status"],
         )
 
+    comparison_results = [
+        result for result in model_results if result.get("model_type") == "individual"
+    ]
+    stacking_result = next(
+        (result for result in model_results if result.get("model_id") == "stacking"),
+        None,
+    )
+    if stacking_result is not None:
+        stacking_result["normalized_metrics"] = None
+        stacking_result["overall_score"] = None
+        stacking_result["rank"] = None
+
     try:
-        normalize_model_results(model_results)
+        normalize_model_results(comparison_results)
         _emit(
             event_logger,
             "normalization_completed",
             "Success",
-            message="Nine required metrics were normalized across valid candidates.",
+            message=(
+                "Nine required metrics were normalized across the five individual "
+                "comparison models."
+            ),
         )
     except Exception as error:
         _emit(
@@ -234,17 +254,17 @@ def train_and_compare_models(
         )
         raise
 
-    ranked = rank_model_results(model_results)
-    best_model = identify_best_model(model_results)
+    ranked = rank_model_results(comparison_results)
+    best_model = identify_best_model(comparison_results)
     if best_model:
         _emit(
             event_logger,
-            "best_model_recommended",
+            "individual_comparison_ranked",
             "Success",
             best_model["model_name"],
             (
-                f"{best_model['model_name']} recommended with normalized score "
-                f"{best_model['overall_score']:.4f}."
+                f"{best_model['model_name']} leads the individual-model comparison "
+                f"with normalized score {best_model['overall_score']:.4f}."
             ),
         )
 
@@ -252,5 +272,6 @@ def train_and_compare_models(
         "model_results": model_results,
         "ranked_results": ranked,
         "best_model": best_model,
+        "stacking_result": stacking_result,
         "stacking_cv": stacking_cv,
     }

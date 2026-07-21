@@ -1,8 +1,14 @@
+import joblib
 from sklearn.base import clone
 from sklearn.ensemble import StackingClassifier
 from sklearn.linear_model import LogisticRegression
 
-from services.model_registry import MODEL_IDS, build_model_candidates, safe_model_filename
+from services.model_registry import (
+    MODEL_IDS,
+    MODEL_WORKFLOW_VERSION,
+    build_model_candidates,
+    safe_model_filename,
+)
 
 
 EXPECTED_NAMES = (
@@ -38,10 +44,11 @@ def test_stacking_uses_five_models_and_logistic_regression():
     candidates = build_model_candidates(stacking_cv=3)
     stacking = candidates["stacking"]["estimator"]
     assert isinstance(stacking, StackingClassifier)
-    assert [name for name, _ in stacking.estimators] == list(MODEL_IDS.keys())[:5]
-    assert isinstance(stacking.final_estimator, LogisticRegression)
-    assert stacking.stack_method == "predict_proba"
-    assert stacking.passthrough is False
+    parameters = stacking.get_params(deep=False)
+    assert [name for name, _ in parameters["estimators"]] == list(MODEL_IDS.keys())[:5]
+    assert isinstance(parameters["final_estimator"], LogisticRegression)
+    assert parameters["stack_method"] == "predict_proba"
+    assert parameters["passthrough"] is False
 
 
 def test_all_five_individual_models_train_successfully(trained_bundle):
@@ -57,6 +64,30 @@ def test_successful_run_produces_six_results(trained_bundle):
     assert len(results) == 6
     assert len(list_model_results(trained_bundle["run_id"])) == 6
     assert all(result["status"] == "completed" for result in results)
+
+
+def test_only_individual_models_are_ranked(trained_bundle):
+    result = trained_bundle["result"]
+    assert len(result["ranked_results"]) == 5
+    assert all(model["model_type"] == "individual" for model in result["ranked_results"])
+    assert result["best_model"]["model_type"] == "individual"
+    assert result["stacking_result"]["model_name"] == "Stacking Ensemble"
+    assert result["stacking_result"]["overall_score"] is None
+    assert result["stacking_result"].get("rank") is None
+
+
+def test_stacking_artifact_is_current_and_fitted(trained_bundle):
+    stacking_result = trained_bundle["result"]["stacking_result"]
+    artifact = joblib.load(stacking_result["model_path"])
+    classifier = artifact["pipeline"].named_steps["classifier"]
+    parameters = classifier.get_params(deep=False)
+    fitted_estimators = getattr(classifier, "estimators_", ())
+    fitted_final_estimator = getattr(classifier, "final_estimator_", None)
+
+    assert artifact["workflow_version"] == MODEL_WORKFLOW_VERSION
+    assert len(fitted_estimators) == 5
+    assert isinstance(fitted_final_estimator, LogisticRegression)
+    assert parameters["stack_method"] == "predict_proba"
 
 
 def test_training_reports_start_and_completion_for_each_model(trained_bundle):

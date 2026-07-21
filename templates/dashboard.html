@@ -38,9 +38,9 @@
             <small>Attack-class target labels</small>
         </div>
         <div class="metric-card success">
-            <span class="metric-label">Best Model</span>
+            <span class="metric-label">Top Individual</span>
             <strong>{{ latest_run.recommended_model_name if latest_run and latest_run.recommended_model_name else "Pending" }}</strong>
-            <small>{% if latest_run and latest_run.recommended_score is not none %}Score {{ '%.4f'|format(latest_run.recommended_score) }}{% else %}Run training to compare{% endif %}</small>
+            <small>{% if latest_run and latest_run.recommended_score is not none %}Comparison score {{ '%.4f'|format(latest_run.recommended_score) }}{% else %}Run training to compare{% endif %}</small>
         </div>
     </section>
 
@@ -77,7 +77,11 @@
                     <tbody>
                         {% for result in model_results %}
                         <tr class="{% if result.is_recommended %}best-row{% endif %}">
-                            <td><strong>{{ result.model_name }}</strong>{% if result.is_recommended %}<span class="best-badge">Best</span>{% endif %}</td>
+                            <td>
+                                <strong>{{ result.model_name }}</strong>
+                                {% if result.is_recommended %}<span class="best-badge">Top Individual</span>{% endif %}
+                                {% if stacking_model and result.model_id == stacking_model.model_id %}<span class="status-pill active">Final Framework</span>{% endif %}
+                            </td>
                             <td>{{ percent(result.accuracy) }}</td>
                             <td>{{ percent(result.precision_score) }}</td>
                             <td>{{ percent(result.recall) }}</td>
@@ -120,8 +124,8 @@
             </div>
             <div>
                 <p class="eyebrow">Traffic Classifier</p>
-                <h2>{% if active_deployment %}{{ active_deployment.model_name }}{% else %}Ensemble IDS Pipeline{% endif %}</h2>
-                <p>{% if active_deployment %}Active deployment from run #{{ active_deployment.run_id }}. Manual traffic prediction is ready.{% else %}CSV validation, preprocessing, six-model training, evaluation, and Joblib export are handled in one workflow.{% endif %}</p>
+                <h2>{% if active_deployment %}{{ active_deployment.model_name }}{% else %}Stacking Ensemble{% endif %}</h2>
+                <p>{% if active_deployment %}Active deployment from run #{{ active_deployment.run_id }}. Manual traffic prediction is ready.{% elif stacking_eligible %}The latest Stacking evaluation passed its quality gate and is ready for administrator deployment.{% else %}The five individual models provide research comparisons; evaluated Stacking is the final prediction framework. {{ stacking_eligibility_reason }}{% endif %}</p>
                 {% if active_deployment %}
                 <a class="btn btn-outline-light mt-2" href="{{ url_for('simulation_demo') }}"><i class="bi bi-activity"></i> Open Prediction</a>
                 {% endif %}

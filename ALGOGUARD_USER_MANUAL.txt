@@ -15,11 +15,12 @@ It has two main modes:
 
 1. Dataset Mode
    Upload a CSV dataset, train machine learning models, compare the results,
-   and identify the best model.
+   rank the five individual models for research, and evaluate Stacking for
+   deployment.
 
 2. Simulation Mode
-   Type one network traffic example manually and let the pretrained model
-   classify it as Normal or Attack.
+   Type one network traffic example manually and let the active deployed
+   Stacking model classify it as Normal or Attack.
 
 Important:
 AlgoGuard is a simulation/prototype. It does not capture live network packets
@@ -85,7 +86,7 @@ Admins
 
 Dashboard
     Shows the AlgoGuard overview, latest dataset result, normal/anomaly
-    counts, and best model after training.
+    counts, top individual comparison model, and Stacking deployment status.
 
 Upload
     Uploads a CSV dataset and trains models.
@@ -249,7 +250,8 @@ After upload, AlgoGuard:
 8. Tests each model.
 9. Shows the metrics.
 10. Saves model records and report metadata in SQLite.
-11. Chooses the best-performing model.
+11. Ranks the five individual models for research comparison.
+12. Checks whether Stacking meets the deployment quality requirements.
 
 If the model predicts anomaly correctly:
     Recall and F1-score may improve.
@@ -531,9 +533,8 @@ If the Simulation page predicts Attack:
 5. The model result is saved in the prediction table.
 6. An alert record is created in the alert table.
 
-Future improvement:
-Add an Alert History page so admins can review saved alert records directly
-inside the web interface.
+Alert History lets admins review saved Attack prediction alerts directly in
+the web interface.
 
 
 19. WHAT HAPPENS IF SIMULATION DETECTS NORMAL
@@ -546,7 +547,7 @@ If the Simulation page predicts Normal:
 3. The entered flow values are shown.
 4. The traffic flow and prediction are saved in SQLite.
 
-This means the pretrained model thinks the flow is closer to normal traffic
+This means the active Stacking model thinks the flow is closer to normal traffic
 than attack traffic.
 
 
@@ -596,17 +597,23 @@ Use False Positive Rate to understand how often normal traffic is wrongly
 flagged as suspicious.
 
 
-22. BEST MODEL SELECTION
-------------------------
+22. INDIVIDUAL COMPARISON AND STACKING DEPLOYMENT
+-------------------------------------------------
 
-AlgoGuard chooses the best model using:
+AlgoGuard ranks the five individual models using nine normalized metrics:
+Accuracy, Precision, Recall, F1-score, ROC-AUC, False Positive Rate, CPU time,
+peak RAM increase, and model size. This ranking is for research comparison
+only. The top individual model is shown on the Dashboard and Results page, but
+it cannot be deployed.
 
-1. Higher F1-score
-2. Higher accuracy
-3. Lower false positive rate
-4. Lower processing time
+Stacking uses all five model families as base learners and Logistic Regression
+to combine their probabilities. It is evaluated separately and is the only
+deployable prediction framework.
 
-The best model is shown on the Dashboard and Results page.
+By default, Stacking must complete successfully and achieve at least 70%
+Accuracy, 70% F1-score, and 70% ROC-AUC. If training fails, an evaluation value
+is missing, or any requirement is missed, deployment is blocked. An
+administrator must explicitly press Deploy Stacking after the gate passes.
 
 
 23. WHAT FILES ARE CREATED AFTER TRAINING
@@ -656,10 +663,11 @@ Short explanation:
 
 AlgoGuard is a lightweight anomaly detection prototype for network traffic.
 It allows users to upload a CSV dataset, automatically preprocesses the data,
-trains three ensemble machine learning models, compares their performance, and
-identifies the best model. It also includes a manual Simulation page where a
-single network flow can be classified as Normal or Attack using pretrained
-model artifacts from artifacts/pretrained.
+trains five individual machine learning models for research comparison, and
+trains a Stacking Ensemble that combines their probability outputs using
+Logistic Regression. Only an evaluated, quality-gated Stacking model can be
+deployed. The Simulation page classifies a single network flow as Normal or
+Attack using the active Stacking artifact in saved_models/deployed_model.joblib.
 
 If asked if it monitors real traffic:
 
