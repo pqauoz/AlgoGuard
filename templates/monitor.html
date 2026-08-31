@@ -1,0 +1,518 @@
+{% extends "base.html" %}
+
+{% block title %}Live Monitor | AlgoGuard{% endblock %}
+{% block body_class %}dashboard-body{% endblock %}
+
+{% block content %}
+<section class="dashboard-header compact">
+    <div>
+        <p class="eyebrow">Continuous Detection</p>
+        <h1>Live Monitor</h1>
+        <p class="header-copy">Stream network flows through the deployed model and watch anomalies surface in real time.</p>
+    </div>
+    <a class="btn btn-outline-light" href="{{ url_for('simulation_demo') }}">
+        <i class="bi bi-activity"></i>
+        Manual Prediction
+    </a>
+</section>
+
+{% if not available %}
+<section class="panel unavailable-panel">
+    <i class="bi bi-cloud-slash"></i>
+    <h2>No active deployment</h2>
+    <p>{{ unavailable_message }}</p>
+    <p class="monitor-hint">Deploy the Stacking Ensemble from a terminal with <code>python train.py datasets/algoguard_big.csv --deploy</code>.</p>
+    <a class="btn btn-accent" href="{{ url_for('dashboard') }}">Back to Dashboard</a>
+</section>
+{% else %}
+<section class="panel monitor-controls">
+    <div class="panel-heading">
+        <div>
+            <p class="eyebrow">Session Control</p>
+            <h2>Traffic Stream</h2>
+        </div>
+        <span class="status-pill" id="monitorState">Idle</span>
+    </div>
+
+    <div class="monitor-control-grid">
+        <div>
+            <label class="form-label" for="monitorSource">Traffic source</label>
+            <select class="form-select" id="monitorSource">
+                {% for item in options.sources %}
+                <option value="{{ item.value }}"{% if item.value == options.defaults.source_type %} selected{% endif %}>{{ item.label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div id="monitorDatasetField">
+            <label class="form-label" for="monitorDataset">Sample dataset</label>
+            <select class="form-select" id="monitorDataset">
+                {% for item in options.datasets %}
+                <option value="{{ item.value }}"{% if item.value == options.defaults.dataset %} selected{% endif %}>{{ item.label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div id="monitorCaptureField" hidden>
+            <label class="form-label" for="monitorCapture">Capture file</label>
+            <select class="form-select" id="monitorCapture">
+                {% for item in options.captures %}
+                <option value="{{ item.value }}">{{ item.label }}</option>
+                {% else %}
+                <option value="">No .pcap files in captures/</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div id="monitorInterfaceField" hidden>
+            <label class="form-label" for="monitorInterface">Network interface</label>
+            <select class="form-select" id="monitorInterface">
+                <option value="">Default interface</option>
+                {% for item in options.interfaces %}
+                <option value="{{ item.value }}">{{ item.label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div id="monitorSpeedField">
+            <label class="form-label" for="monitorSpeed">Replay speed</label>
+            <select class="form-select" id="monitorSpeed">
+                {% for item in options.speeds %}
+                <option value="{{ item.value }}"{% if item.value == options.defaults.speed %} selected{% endif %}>{{ item.label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div id="monitorOrderField">
+            <label class="form-label" for="monitorOrder">Flow order</label>
+            <select class="form-select" id="monitorOrder">
+                {% for item in options.orders %}
+                <option value="{{ item.value }}"{% if item.value == options.defaults.order %} selected{% endif %}>{{ item.label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label class="form-label" for="monitorPersist">Storage</label>
+            <select class="form-select" id="monitorPersist">
+                {% for item in options.persistence %}
+                <option value="{{ item.value }}"{% if item.value == options.defaults.persist %} selected{% endif %}>{{ item.label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+    </div>
+
+    {% if not options.live_capture.available %}
+    <p class="monitor-hint" id="liveUnavailableHint" hidden>
+        Live capture is unavailable: {{ options.live_capture.reason }}
+        Replay sources still work normally.
+    </p>
+    {% endif %}
+
+    <div class="monitor-actions">
+        <button class="btn btn-accent" type="button" id="monitorStart"><i class="bi bi-play-fill"></i> Start Monitoring</button>
+        <button class="btn btn-outline-light" type="button" id="monitorPause" disabled><i class="bi bi-pause-fill"></i> Pause</button>
+        <button class="btn btn-outline-light" type="button" id="monitorStop" disabled><i class="bi bi-stop-fill"></i> Stop</button>
+        <span class="monitor-live" id="monitorLive" hidden><span class="monitor-live-dot"></span> LIVE</span>
+    </div>
+    <p class="monitor-message" id="monitorMessage" role="status"></p>
+</section>
+
+<section class="metric-grid monitor-metrics">
+    <div class="metric-card">
+        <span class="metric-label">Flows Analyzed</span>
+        <strong id="statFlows">0</strong>
+        <small id="statProgress">Waiting to start</small>
+    </div>
+    <div class="metric-card warning">
+        <span class="metric-label">Attacks</span>
+        <strong id="statAttacks">0</strong>
+        <small id="statRatio">0.00% of the stream</small>
+    </div>
+    <div class="metric-card success">
+        <span class="metric-label">Normal</span>
+        <strong id="statNormals">0</strong>
+        <small>Classified as benign</small>
+    </div>
+    <div class="metric-card">
+        <span class="metric-label">Alerts Raised</span>
+        <strong id="statAlerts">0</strong>
+        <small id="statLatency">Average latency N/A</small>
+    </div>
+</section>
+
+<section class="dashboard-layout monitor-layout">
+    <div class="panel monitor-feed-panel">
+        <div class="panel-heading">
+            <div>
+                <p class="eyebrow">Classification Feed</p>
+                <h2>Recent Flows</h2>
+            </div>
+            <span class="status-pill active">{{ deployment.model_name }}</span>
+        </div>
+        <div class="table-responsive monitor-feed-scroll">
+            <table class="table table-dark table-hover align-middle mb-0 feed-table">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Source &rarr; Destination</th>
+                        <th>Proto</th>
+                        <th>Service</th>
+                        <th>Verdict</th>
+                        <th>Confidence</th>
+                        <th>Actual</th>
+                    </tr>
+                </thead>
+                <tbody id="feedBody">
+                    <tr class="feed-empty-row"><td colspan="7">Start a session to see classified traffic.</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="panel monitor-chart-panel">
+        <div class="panel-heading">
+            <div>
+                <p class="eyebrow">Traffic Mix</p>
+                <h2>Detection Timeline</h2>
+            </div>
+        </div>
+        <canvas id="monitorChart" class="monitor-chart" height="220" aria-label="Attack and normal flow counts over time"></canvas>
+        <div class="monitor-legend">
+            <span><i class="legend-swatch legend-normal"></i> Normal</span>
+            <span><i class="legend-swatch legend-attack"></i> Attack</span>
+        </div>
+        <dl class="detail-list monitor-detail-list">
+            <div><dt>Model</dt><dd>{{ deployment.model_name }}</dd></div>
+            <div><dt>Source run</dt><dd>#{{ deployment.run_id }}</dd></div>
+            <div><dt>Label mismatches</dt><dd id="statMismatches">0</dd></div>
+            <div><dt>Stored flows</dt><dd id="statPersisted">0</dd></div>
+            <div hidden id="statLagRow"><dt>Detection lag</dt><dd id="statLag">N/A</dd></div>
+            <div hidden id="statCaptureRow"><dt>Packets captured</dt><dd id="statCapture">0</dd></div>
+        </dl>
+    </div>
+</section>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if available %}
+<script>
+(function () {
+    const POLL_INTERVAL_MS = 700;
+    const MAX_FEED_ROWS = 50;
+    const MAX_BUCKETS = 80;
+    const ACTIVE_STATES = ["starting", "running", "paused"];
+
+    const startButton = document.getElementById("monitorStart");
+    const pauseButton = document.getElementById("monitorPause");
+    const stopButton = document.getElementById("monitorStop");
+    const statePill = document.getElementById("monitorState");
+    const livePill = document.getElementById("monitorLive");
+    const messageBox = document.getElementById("monitorMessage");
+    const feedBody = document.getElementById("feedBody");
+    const controls = {
+        source: document.getElementById("monitorSource"),
+        dataset: document.getElementById("monitorDataset"),
+        capture: document.getElementById("monitorCapture"),
+        iface: document.getElementById("monitorInterface"),
+        speed: document.getElementById("monitorSpeed"),
+        order: document.getElementById("monitorOrder"),
+        persist: document.getElementById("monitorPersist"),
+    };
+    const fields = {
+        dataset: document.getElementById("monitorDatasetField"),
+        capture: document.getElementById("monitorCaptureField"),
+        iface: document.getElementById("monitorInterfaceField"),
+        speed: document.getElementById("monitorSpeedField"),
+        order: document.getElementById("monitorOrderField"),
+    };
+    const liveHint = document.getElementById("liveUnavailableHint");
+    const liveAvailable = {{ options.live_capture.available|tojson }};
+    const canvas = document.getElementById("monitorChart");
+
+    function updateSourceFields() {
+        const type = controls.source.value;
+        fields.dataset.hidden = type !== "csv";
+        fields.capture.hidden = type !== "pcap";
+        fields.iface.hidden = type !== "live";
+        fields.speed.hidden = type === "live";
+        fields.order.hidden = type === "live";
+        if (liveHint) {
+            liveHint.hidden = type !== "live";
+        }
+        startButton.disabled = startButton.disabled
+            || (type === "live" && !liveAvailable);
+    }
+
+    let lastSeq = 0;
+    let pollTimer = null;
+    let buckets = [];
+    let pendingBucket = { normal: 0, attack: 0 };
+
+    function setMessage(text, isError) {
+        messageBox.textContent = text || "";
+        messageBox.classList.toggle("is-error", Boolean(isError));
+    }
+
+    function formatNumber(value) {
+        return Number(value || 0).toLocaleString();
+    }
+
+    function renderState(session) {
+        const state = session.state || "idle";
+        const isActive = ACTIVE_STATES.indexOf(state) !== -1;
+        statePill.textContent = state.charAt(0).toUpperCase() + state.slice(1);
+        statePill.classList.toggle("active", state === "running");
+        livePill.hidden = state !== "running";
+
+        startButton.disabled = isActive;
+        pauseButton.disabled = state !== "running" && state !== "paused";
+        stopButton.disabled = !isActive;
+        pauseButton.innerHTML = state === "paused"
+            ? '<i class="bi bi-play-fill"></i> Resume'
+            : '<i class="bi bi-pause-fill"></i> Pause';
+        Object.keys(controls).forEach(function (key) {
+            controls[key].disabled = isActive;
+        });
+
+        const totals = session.totals || {};
+        document.getElementById("statFlows").textContent = formatNumber(totals.flows);
+        document.getElementById("statAttacks").textContent = formatNumber(totals.attacks);
+        document.getElementById("statNormals").textContent = formatNumber(totals.normals);
+        document.getElementById("statAlerts").textContent = formatNumber(totals.alerts);
+        document.getElementById("statMismatches").textContent = formatNumber(totals.mismatches);
+        document.getElementById("statPersisted").textContent = formatNumber(totals.persisted)
+            + (session.capped ? " (capped)" : "");
+        document.getElementById("statRatio").textContent =
+            Number(session.attack_ratio || 0).toFixed(2) + "% of the stream";
+        document.getElementById("statLatency").textContent = session.avg_latency_ms
+            ? "Average latency " + Number(session.avg_latency_ms).toFixed(3) + " ms"
+            : "Average latency N/A";
+        if (session.row_total) {
+            document.getElementById("statProgress").textContent =
+                formatNumber(totals.flows) + " of " + formatNumber(session.row_total) + " flows";
+        } else if (session.source_type === "live" && isActive) {
+            document.getElementById("statProgress").textContent = "Real-time capture";
+        } else {
+            document.getElementById("statProgress").textContent = "Waiting to start";
+        }
+
+        const lagRow = document.getElementById("statLagRow");
+        const captureRow = document.getElementById("statCaptureRow");
+        const isLive = session.source_type === "live";
+        lagRow.hidden = !isLive;
+        captureRow.hidden = !isLive;
+        if (isLive) {
+            document.getElementById("statLag").textContent = session.avg_detection_lag_ms
+                ? Number(session.avg_detection_lag_ms).toFixed(1) + " ms avg"
+                : "N/A";
+            const capture = session.capture || {};
+            document.getElementById("statCapture").textContent =
+                formatNumber(capture.packets)
+                + (capture.dropped ? " (" + formatNumber(capture.dropped) + " dropped)" : "");
+        }
+
+        if (session.error_message) {
+            setMessage(session.error_message, true);
+        } else if (state === "completed") {
+            setMessage("The traffic source finished streaming.", false);
+        }
+        updateSourceFields();
+        return isActive;
+    }
+
+    function addFeedRows(events) {
+        if (!events.length) {
+            return;
+        }
+        const emptyRow = feedBody.querySelector(".feed-empty-row");
+        if (emptyRow) {
+            emptyRow.remove();
+        }
+        events.forEach(function (event) {
+            if (event.prediction === "Attack") {
+                pendingBucket.attack += 1;
+            } else {
+                pendingBucket.normal += 1;
+            }
+            const row = document.createElement("tr");
+            row.className = event.prediction === "Attack" ? "feed-attack" : "feed-normal";
+            const actual = event.actual === null || event.actual === undefined
+                ? "&mdash;"
+                : (event.match
+                    ? '<span class="feed-match">' + event.actual + "</span>"
+                    : '<span class="feed-mismatch">' + event.actual + "</span>");
+            const sourceLabel = event.source_ip
+                + (event.source_port ? ":" + event.source_port : "");
+            const destinationLabel = event.destination_ip
+                + (event.destination_port ? ":" + event.destination_port : "");
+            row.innerHTML =
+                "<td>" + (event.timestamp || "") + "</td>" +
+                "<td class=\"feed-endpoints\">" + sourceLabel + " &rarr; " + destinationLabel + "</td>" +
+                "<td>" + (event.proto || "-") + "</td>" +
+                "<td>" + (event.service || "-") + "</td>" +
+                '<td><span class="verdict-badge verdict-' + event.prediction.toLowerCase() + '">' + event.prediction + "</span></td>" +
+                "<td>" + Number(event.confidence).toFixed(2) + "%</td>" +
+                "<td>" + actual + "</td>";
+            feedBody.insertBefore(row, feedBody.firstChild);
+        });
+        while (feedBody.children.length > MAX_FEED_ROWS) {
+            feedBody.removeChild(feedBody.lastChild);
+        }
+    }
+
+    function drawChart() {
+        const context = canvas.getContext("2d");
+        const ratio = window.devicePixelRatio || 1;
+        const width = canvas.clientWidth || canvas.width;
+        const height = 220;
+        if (canvas.width !== width * ratio || canvas.height !== height * ratio) {
+            canvas.width = width * ratio;
+            canvas.height = height * ratio;
+        }
+        context.setTransform(ratio, 0, 0, ratio, 0, 0);
+        context.clearRect(0, 0, width, height);
+
+        const styles = getComputedStyle(document.documentElement);
+        const lineColor = styles.getPropertyValue("--line").trim() || "#22323d";
+        const normalColor = styles.getPropertyValue("--cyan").trim() || "#22d3ee";
+        const attackColor = styles.getPropertyValue("--red").trim() || "#ff5c72";
+
+        context.strokeStyle = lineColor;
+        context.lineWidth = 1;
+        for (let step = 0; step <= 4; step += 1) {
+            const y = Math.round((height / 4) * step) + 0.5;
+            context.beginPath();
+            context.moveTo(0, y);
+            context.lineTo(width, y);
+            context.stroke();
+        }
+        if (!buckets.length) {
+            return;
+        }
+
+        const peak = Math.max.apply(null, buckets.map(function (bucket) {
+            return bucket.normal + bucket.attack;
+        })) || 1;
+        const slot = width / MAX_BUCKETS;
+        const barWidth = Math.max(slot - 2, 1);
+
+        buckets.forEach(function (bucket, index) {
+            const x = index * slot;
+            const normalHeight = (bucket.normal / peak) * (height - 8);
+            const attackHeight = (bucket.attack / peak) * (height - 8);
+            context.fillStyle = normalColor;
+            context.fillRect(x, height - normalHeight, barWidth, normalHeight);
+            context.fillStyle = attackColor;
+            context.fillRect(x, height - normalHeight - attackHeight, barWidth, attackHeight);
+        });
+    }
+
+    function pushBucket() {
+        buckets.push(pendingBucket);
+        pendingBucket = { normal: 0, attack: 0 };
+        if (buckets.length > MAX_BUCKETS) {
+            buckets = buckets.slice(-MAX_BUCKETS);
+        }
+        drawChart();
+    }
+
+    function stopPolling() {
+        if (pollTimer) {
+            window.clearInterval(pollTimer);
+            pollTimer = null;
+        }
+    }
+
+    function startPolling() {
+        if (!pollTimer) {
+            pollTimer = window.setInterval(poll, POLL_INTERVAL_MS);
+        }
+    }
+
+    function poll() {
+        fetch("{{ url_for('monitor_status') }}?since=" + lastSeq, { credentials: "same-origin" })
+            .then(function (response) { return response.json(); })
+            .then(function (data) {
+                if (data.status !== "success") {
+                    return;
+                }
+                if (data.events && data.events.length) {
+                    addFeedRows(data.events);
+                    lastSeq = data.last_seq;
+                }
+                pushBucket();
+                if (!renderState(data.session)) {
+                    stopPolling();
+                }
+            })
+            .catch(function () {
+                setMessage("Lost contact with the monitoring session.", true);
+                stopPolling();
+            });
+    }
+
+    function control(url, body) {
+        return fetch(url, {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body || {}),
+        })
+            .then(function (response) {
+                return response.json().then(function (data) {
+                    return { ok: response.ok, data: data };
+                });
+            })
+            .then(function (result) {
+                if (!result.ok || result.data.status !== "success") {
+                    setMessage(result.data.message || "The monitoring session could not be updated.", true);
+                    return;
+                }
+                setMessage("", false);
+                renderState(result.data.session);
+                startPolling();
+            })
+            .catch(function () {
+                setMessage("The monitoring session could not be updated.", true);
+            });
+    }
+
+    startButton.addEventListener("click", function () {
+        lastSeq = 0;
+        buckets = [];
+        pendingBucket = { normal: 0, attack: 0 };
+        feedBody.innerHTML = '<tr class="feed-empty-row"><td colspan="7">Starting the traffic stream&hellip;</td></tr>';
+        drawChart();
+        control("{{ url_for('monitor_start') }}", {
+            source_type: controls.source.value,
+            dataset: controls.dataset.value,
+            capture_file: controls.capture.value || null,
+            interface: controls.iface.value || null,
+            speed: controls.speed.value,
+            order: controls.order.value,
+            persist: controls.persist.value,
+        });
+    });
+
+    controls.source.addEventListener("change", updateSourceFields);
+
+    pauseButton.addEventListener("click", function () {
+        const paused = pauseButton.textContent.indexOf("Resume") !== -1;
+        control(paused ? "{{ url_for('monitor_resume') }}" : "{{ url_for('monitor_pause') }}");
+    });
+
+    stopButton.addEventListener("click", function () {
+        control("{{ url_for('monitor_stop') }}");
+    });
+
+    window.addEventListener("resize", drawChart);
+
+    // Re-attach to a session that is already running, so a page reload never
+    // orphans the monitor.
+    const initial = {{ initial_status|tojson }};
+    lastSeq = initial.last_seq || 0;
+    addFeedRows(initial.events || []);
+    drawChart();
+    if (renderState(initial.session)) {
+        startPolling();
+    }
+})();
+</script>
+{% endif %}
+{% endblock %}

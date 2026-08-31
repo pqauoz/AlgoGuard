@@ -13,34 +13,40 @@
         <div>
             <p class="eyebrow">Network Anomaly Detection</p>
             <h1>AlgoGuard</h1>
-            <p class="header-copy">Lightweight ensemble learning for CSV-based traffic analysis.</p>
+            <p class="header-copy">Stacking ensemble detection for network traffic flows.</p>
         </div>
-        <a class="btn btn-accent" href="{{ url_for('upload_dataset') }}">
-            <i class="bi bi-upload"></i>
-            Upload CSV
-        </a>
+        <div class="header-actions">
+            <a class="btn btn-accent" href="{{ url_for('live_monitor') }}">
+                <i class="bi bi-broadcast"></i>
+                Live Monitor
+            </a>
+            <a class="btn btn-outline-light" href="{{ url_for('simulation_demo') }}">
+                <i class="bi bi-activity"></i>
+                Manual Prediction
+            </a>
+        </div>
     </section>
 
     <section class="metric-grid">
         <div class="metric-card">
-            <span class="metric-label">Analyzed Rows</span>
-            <strong>{{ '{:,}'.format(latest_run.row_count or 0) if latest_run else 0 }}</strong>
-            <small>{{ latest_run.filename if latest_run else "No dataset uploaded" }}</small>
-        </div>
-        <div class="metric-card">
-            <span class="metric-label">Normal Traffic</span>
-            <strong>{{ '{:,}'.format(latest_run.normal_count or 0) if latest_run else 0 }}</strong>
-            <small>Detected from target labels</small>
+            <span class="metric-label">Flows Analyzed</span>
+            <strong>{{ '{:,}'.format(stats.total_flows) }}</strong>
+            <small>{% if stats.last_prediction_at %}Last at {{ stats.last_prediction_at }}{% else %}No traffic classified yet{% endif %}</small>
         </div>
         <div class="metric-card warning">
-            <span class="metric-label">Anomalies</span>
-            <strong>{{ '{:,}'.format(latest_run.anomaly_count or 0) if latest_run else 0 }}</strong>
-            <small>Attack-class target labels</small>
+            <span class="metric-label">Attacks Detected</span>
+            <strong>{{ '{:,}'.format(stats.attack_count) }}</strong>
+            <small>{{ '%.2f'|format(stats.attack_ratio) }}% of analyzed traffic</small>
         </div>
         <div class="metric-card success">
-            <span class="metric-label">Top Individual</span>
-            <strong>{{ latest_run.recommended_model_name if latest_run and latest_run.recommended_model_name else "Pending" }}</strong>
-            <small>{% if latest_run and latest_run.recommended_score is not none %}Comparison score {{ '%.4f'|format(latest_run.recommended_score) }}{% else %}Run training to compare{% endif %}</small>
+            <span class="metric-label">Normal Traffic</span>
+            <strong>{{ '{:,}'.format(stats.normal_count) }}</strong>
+            <small>Classified as benign flows</small>
+        </div>
+        <div class="metric-card">
+            <span class="metric-label">Open Alerts</span>
+            <strong>{{ '{:,}'.format(stats.alerts_open) }}</strong>
+            <small><a class="text-link" href="{{ url_for('alert_history') }}">{{ '{:,}'.format(stats.alerts_total) }} alerts in total</a></small>
         </div>
     </section>
 
@@ -48,62 +54,48 @@
         <div class="panel">
             <div class="panel-heading">
                 <div>
-                    <p class="eyebrow">Latest Run</p>
-                    <h2>Model Comparison Snapshot</h2>
+                    <p class="eyebrow">Detection Engine</p>
+                    <h2>Deployed Model</h2>
                 </div>
-                {% if latest_run and latest_run.training_status == "completed" %}
-                    <span class="status-pill active">Complete</span>
-                {% elif latest_run %}
-                    <span class="status-pill">{{ latest_run.training_status|replace('_', ' ')|title }}</span>
+                {% if active_deployment %}
+                    <span class="status-pill active">Deployed</span>
                 {% else %}
-                    <span class="status-pill">Awaiting Data</span>
+                    <span class="status-pill">Not Deployed</span>
                 {% endif %}
             </div>
 
-            {% if model_results %}
-            <div class="table-responsive">
-                <table class="table table-dark table-hover align-middle mb-0">
-                    <thead>
-                        <tr>
-                            <th>Model</th>
-                            <th>Accuracy</th>
-                            <th>Precision</th>
-                            <th>Recall</th>
-                            <th>F1-score</th>
-                            <th>ROC-AUC</th>
-                            <th>FPR</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for result in model_results %}
-                        <tr class="{% if result.is_recommended %}best-row{% endif %}">
-                            <td>
-                                <strong>{{ result.model_name }}</strong>
-                                {% if result.is_recommended %}<span class="best-badge">Top Individual</span>{% endif %}
-                                {% if stacking_model and result.model_id == stacking_model.model_id %}<span class="status-pill active">Final Framework</span>{% endif %}
-                            </td>
-                            <td>{{ percent(result.accuracy) }}</td>
-                            <td>{{ percent(result.precision_score) }}</td>
-                            <td>{{ percent(result.recall) }}</td>
-                            <td>{{ percent(result.f1_score) }}</td>
-                            <td>{{ percent(result.roc_auc) }}</td>
-                            <td>{{ percent(result.fpr) }}</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+            {% if active_deployment %}
+            <div class="deployed-model-name">
+                <span class="deployed-model-mark" aria-hidden="true"><i class="bi bi-cpu"></i></span>
+                <div>
+                    <strong>{{ active_deployment.model_name }}</strong>
+                    <small>{{ active_deployment.model_type }} &middot; source run #{{ active_deployment.run_id }}</small>
+                </div>
             </div>
+            <dl class="detail-list">
+                <div><dt>Trained on</dt><dd>{{ active_deployment.filename }}</dd></div>
+                <div><dt>Deployed at</dt><dd>{{ active_deployment.deployed_at }}</dd></div>
+                <div><dt>Accuracy</dt><dd>{{ percent(active_deployment.accuracy) }}</dd></div>
+                <div><dt>Precision</dt><dd>{{ percent(active_deployment.precision_score) }}</dd></div>
+                <div><dt>Recall</dt><dd>{{ percent(active_deployment.recall) }}</dd></div>
+                <div><dt>F1-score</dt><dd>{{ percent(active_deployment.f1_score) }}</dd></div>
+                <div><dt>ROC-AUC</dt><dd>{{ percent(active_deployment.roc_auc) }}</dd></div>
+                <div><dt>False positive rate</dt><dd>{{ percent(active_deployment.fpr) }}</dd></div>
+                <div><dt>Artifact size</dt><dd>{% if active_deployment.model_size is not none %}{{ '%.2f'|format(active_deployment.model_size) }} MB{% else %}N/A{% endif %}</dd></div>
+                <div><dt>Average latency</dt><dd>{% if stats.avg_latency_ms is not none %}{{ '%.3f'|format(stats.avg_latency_ms) }} ms{% else %}N/A{% endif %}</dd></div>
+            </dl>
             <div class="panel-actions">
-                <a class="btn btn-outline-light" href="{{ url_for('training_results', run_id=latest_run.run_id) }}">
-                    <i class="bi bi-bar-chart"></i>
-                    Open Results
+                <a class="btn btn-outline-light" href="{{ url_for('live_monitor') }}">
+                    <i class="bi bi-broadcast"></i>
+                    Start Monitoring
                 </a>
             </div>
             {% else %}
             <div class="empty-state">
                 <i class="bi bi-database-lock"></i>
-                <h2>No completed analysis yet</h2>
-                <p>Upload a binary Normal/Attack CSV dataset to train and compare the six candidate models.</p>
+                <h2>No model deployed</h2>
+                <p>Train and deploy the Stacking Ensemble from a terminal:</p>
+                <p><code>python train.py datasets/algoguard_big.csv --deploy</code></p>
             </div>
             {% endif %}
         </div>
@@ -125,9 +117,35 @@
             <div>
                 <p class="eyebrow">Traffic Classifier</p>
                 <h2>{% if active_deployment %}{{ active_deployment.model_name }}{% else %}Stacking Ensemble{% endif %}</h2>
-                <p>{% if active_deployment %}Active deployment from run #{{ active_deployment.run_id }}. Manual traffic prediction is ready.{% elif stacking_eligible %}The latest Stacking evaluation passed its quality gate and is ready for administrator deployment.{% else %}The five individual models provide research comparisons; evaluated Stacking is the final prediction framework. {{ stacking_eligibility_reason }}{% endif %}</p>
+                <p>{% if active_deployment %}Watch traffic being classified flow by flow, or submit a single record by hand.{% else %}Deploy an eligible Stacking Ensemble before running detection.{% endif %}</p>
                 {% if active_deployment %}
-                <a class="btn btn-outline-light mt-2" href="{{ url_for('simulation_demo') }}"><i class="bi bi-activity"></i> Open Prediction</a>
+                <a class="btn btn-outline-light mt-2" href="{{ url_for('live_monitor') }}"><i class="bi bi-broadcast"></i> Open Live Monitor</a>
+                {% endif %}
+            </div>
+
+            <div class="dashboard-log-preview">
+                <div class="dashboard-log-heading">
+                    <div>
+                        <p class="eyebrow">Detections</p>
+                        <h2>Recent Alerts</h2>
+                    </div>
+                    <a class="text-link" href="{{ url_for('alert_history') }}">View All</a>
+                </div>
+                {% if latest_alerts %}
+                <div class="event-list">
+                    {% for alert in latest_alerts[:4] %}
+                    <div class="event-row">
+                        <span class="event-mark"><i class="bi bi-exclamation-triangle-fill"></i></span>
+                        <div>
+                            <strong>{{ alert.severity_level }} severity &middot; {{ '%.2f'|format(alert.confidence_score) if alert.confidence_score is not none else 'N/A' }}%</strong>
+                            <small>{{ alert.detected_at }} &middot; {{ alert.model_name or 'Unknown model' }}</small>
+                        </div>
+                        <span class="status-badge {{ 'warning' if alert.alert_status == 'Open' else 'success' }}">{{ alert.alert_status }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="dashboard-log-empty">No attack alerts recorded.</p>
                 {% endif %}
             </div>
 

@@ -33,7 +33,7 @@ EXPECTED_COLUMNS = [
         ("algoguard_biggest.csv", 20_000, 6_388, 13_612),
     ],
 )
-def test_included_dataset_is_ready_for_manual_upload(
+def test_included_dataset_is_ready_for_replay_and_retraining(
     filename,
     rows,
     normal_count,

@@ -20,13 +20,19 @@ def app_module(tmp_path_factory):
     runtime = tmp_path_factory.mktemp("flask-runtime")
     module.app.config.update(
         TESTING=True,
-        UPLOAD_FOLDER=str(runtime / "uploads"),
         SAVED_MODEL_FOLDER=str(runtime / "models"),
-        REPORT_FOLDER=str(runtime / "reports"),
     )
-    for key in ("UPLOAD_FOLDER", "SAVED_MODEL_FOLDER", "REPORT_FOLDER"):
-        Path(module.app.config[key]).mkdir(parents=True, exist_ok=True)
+    Path(module.app.config["SAVED_MODEL_FOLDER"]).mkdir(parents=True, exist_ok=True)
     return module
+
+
+@pytest.fixture(autouse=True)
+def stop_live_monitor_sessions():
+    """Never let a monitoring thread outlive the test that started it."""
+    from services.live_monitor_service import reset_for_tests
+
+    yield
+    reset_for_tests()
 
 
 @pytest.fixture()

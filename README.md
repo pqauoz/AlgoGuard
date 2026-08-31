@@ -1,12 +1,20 @@
 # AlgoGuard
 
-AlgoGuard is a local Flask application for binary network traffic classification. One uploaded CSV creates one independent training run, trains five individual Scikit-learn models plus a Stacking Ensemble, ranks the individual models for research comparison, and lets an administrator deploy only an evaluated Stacking model for manual single-record prediction.
+AlgoGuard is a local Flask application that detects anomalies in network traffic using a deployed Stacking Ensemble. The web application is **inference-only**: it classifies traffic flow by flow in the Live Monitor, or one record at a time on the Prediction page. Model training and deployment happen offline through `train.py`, so the running detector is never disturbed by a training job.
 
-AlgoGuard does not capture live packets, monitor a network continuously, or block traffic. It is an operational research prototype for prepared CSV data and manual prediction.
+The Live Monitor accepts three traffic sources through one pipeline: **live packet capture** from a network interface (data packets are aggregated into flows in real time and classified the moment each flow ends), **recorded packet captures** (`.pcap` files replayed through the same flow tracker, reproducibly), and the original **labelled CSV replay** of the bundled UNSW-NB15 samples, which keeps ground-truth labels visible for accuracy demonstrations. Live capture requires the Npcap driver and elevated privileges on Windows; when they are absent, both replay modes keep working and the monitor explains why live mode is unavailable. AlgoGuard observes and classifies traffic; it never blocks it, and it stores flow metadata only, never packet payloads. Capture live traffic only on networks you are authorized to monitor.
 
 ## Runtime Architecture
 
-Every valid upload trains these exact candidates:
+The application has two detection surfaces and one offline training tool:
+
+| Surface | Purpose |
+| --- | --- |
+| Live Monitor (`/monitor`) | Streams flows from a live interface, a PCAP recording, or a CSV sample through the deployed model, one at a time, with a live feed, timeline chart, and running attack/normal statistics. |
+| Prediction (`/simulation`, `POST /predict`) | Classifies a single hand-entered flow, also available as a JSON API. |
+| `train.py` | Trains and ranks the six candidates offline and deploys the Stacking Ensemble when it passes the quality gate. |
+
+`train.py` trains these exact candidates:
 
 1. Random Forest
 2. Gradient Boosting
@@ -27,26 +35,38 @@ This ranking is for research comparison only and never chooses the deployed mode
 
 ## Main Workflow
 
+Offline, run only when the model needs to be rebuilt:
+
 ```text
-CSV upload
+python train.py <csv> --deploy
   -> validation and independent training-run record
   -> stratified split
   -> five leakage-safe individual pipelines
   -> individual-model comparison ranking
   -> Stacking training with the five base learners
   -> Stacking evaluation and quality gate
-  -> administrator deploys Stacking
-  -> manual prediction using only the active Stacking artifact
-  -> prediction, optional alert, and system logs
+  -> Stacking deployed as the active artifact
 ```
 
-Training history, results, deployments, predictions, alerts, reports, admin accounts, and audit events are stored in SQLite. Uploaded files, reports, per-run artifacts, and the active artifact are runtime files excluded from Git.
+Online, the everyday detection path:
+
+```text
+python app.py
+  -> Live Monitor replays flows through the active artifact
+     (or Prediction classifies one hand-entered flow)
+  -> Normal / Attack verdict with confidence and latency
+  -> Attack raises an alert
+  -> prediction, alert, and audit events stored in SQLite
+```
+
+Training history, results, deployments, predictions, alerts, reports, admin accounts, and audit events are stored in SQLite. Reports, per-run artifacts, and the active artifact are runtime files excluded from Git.
 
 ## Project Structure
 
 ```text
 AlgoGuard/
 |-- app.py
+|-- train.py
 |-- migrate.py
 |-- requirements.txt
 |-- requirements-dev.txt
@@ -54,10 +74,13 @@ AlgoGuard/
 |   |-- database_service.py
 |   |-- deployment_service.py
 |   |-- evaluation_service.py
+|   |-- flow_tracker_service.py
+|   |-- live_monitor_service.py
 |   |-- model_registry.py
 |   |-- preprocessing_service.py
 |   |-- resource_service.py
 |   |-- simulation_service.py
+|   |-- traffic_source_service.py
 |   `-- training_service.py
 |-- templates/
 |-- static/css/style.css
@@ -66,12 +89,14 @@ AlgoGuard/
 |   |-- algoguard_big.csv
 |   |-- algoguard_bigger.csv
 |   `-- algoguard_biggest.csv
+|-- captures/
 |-- database/
-|-- uploads/
 |-- saved_models/
 |-- reports/
 `-- research/
 ```
+
+`app.py` serves detection only; the training services are reached through `train.py`. `uploads/` is retained for historical runtime files and is no longer written to.
 
 `research/` is an archived notebook workspace and is not imported by the Flask application.
 
@@ -132,7 +157,9 @@ Multiple accounts are supported. Administrators can create Administrator or Anal
 
 ## CSV Contract
 
-- Use one `.csv` file per upload.
+This contract applies to datasets passed to `train.py` and to any CSV replayed by the Live Monitor.
+
+- Use one `.csv` file per run.
 - Include a header row.
 - Put all input features before the target.
 - Put the target label in the final column.
@@ -153,9 +180,9 @@ dur,proto,service,state,spkts,dpkts,sbytes,dbytes,rate,sttl,dttl,sload,dload,sin
 
 Each row is one traffic-flow observation. Each feature column is one measured property. The final `label` is the known class used during supervised training. Adding a row labeled `Attack` does not force future inputs with those exact values to be attacks; it gives the models another labeled example from which to learn.
 
-## Included Manual Dataset Files
+## Included Dataset Files
 
-Three ready-to-upload CSV files are included in `datasets/`:
+Three CSV files are included in `datasets/`:
 
 - `algoguard_big.csv`: 5,000 rows
 - `algoguard_bigger.csv`: 10,000 rows
@@ -163,23 +190,57 @@ Three ready-to-upload CSV files are included in `datasets/`:
 
 The files are nested, stratified, non-replacement samples of the labeled UNSW-NB15 training partition. Each file uses the same 15 input features: `dur`, `proto`, `service`, `state`, `spkts`, `dpkts`, `sbytes`, `dbytes`, `rate`, `sttl`, `dttl`, `sload`, `dload`, `sinpkt`, and `dinpkt`. The final binary `label` uses `Normal` and `Attack`. Other source columns, including the identifier and `attack_cat`, were removed to keep training practical and prevent identifier noise or direct target leakage.
 
-AlgoGuard does not generate or combine these files at runtime. Open Upload and select each CSV manually, one at a time. Each upload creates a separate run with six evaluation rows, a ranked five-model research comparison, and one Stacking deployment candidate.
+These files serve two purposes: they are the replay sources offered by the Live Monitor, and they are valid inputs to `train.py` when the model is rebuilt. Because each row keeps its true `label`, the Live Monitor can show whether each prediction matched the recorded outcome.
 
 Dataset source and attribution: [The UNSW-NB15 Dataset, UNSW Research](https://research.unsw.edu.au/projects/unsw-nb15-dataset). Academic work using these files should cite the dataset publications listed by UNSW.
 
-## Deploy and Predict
+## Live Monitor
 
-Open a completed run and review all six evaluation rows. The five individual models are comparison results only. Select **Deploy Stacking** only after its evaluation passes the quality gate. Training never replaces the active model automatically. Deployment saves the Stacking pipeline, model identity, source run, metric summary, and deployment timestamp to `saved_models/deployed_model.joblib` and records the active deployment in SQLite.
+Open **Live Monitor** and choose a traffic source:
+
+- **Sample replay (labelled flows)**: one of the bundled CSV samples, with replay speed (slow, normal, or fast) and flow order (sequential or randomised). Each verdict is compared against the recorded label.
+- **Recorded packets (PCAP)**: a `.pcap`, `.pcapng`, or `.cap` file placed in `captures/`. The data packets are aggregated into bidirectional flows by the flow tracker, and the resulting flows are replayed at the chosen speed. Packet-derived flows have no ground-truth label, so the Actual column shows a dash.
+- **Live interface capture**: a network interface, sniffed in real time. Packets are tracked into flows as they arrive; a flow is classified when its TCP connection tears down, after 15 seconds of silence, or in 120-second slices for long-lived connections. Live mode runs at wire pace (speed and order do not apply) and reports detection lag — the time from a flow ending to its verdict — alongside inference latency, plus captured and dropped packet counters. Each live session is recorded in the `capture_session` table.
+
+For packet sources the flow tracker computes the same 15 features the model was trained on (`dur`, `proto`, `service`, `state`, `spkts`, `dpkts`, `sbytes`, `dbytes`, `rate`, `sttl`, `dttl`, `sload`, `dload`, `sinpkt`, `dinpkt`). `service` is inferred from well-known ports and `state` from observed TCP flags, which approximate how the original UNSW-NB15 features were generated; the closer your training data is to your own network's traffic, the better the verdicts (see Retrain and Deploy).
+
+Then choose a storage mode and Start; Pause, Resume, and Stop control the session. The page polls for new classifications, so reloading the browser re-attaches to a session that is still running rather than orphaning it.
+
+**Live capture prerequisites (Windows):** install [Npcap](https://npcap.com) with the "WinPcap API-compatible mode" default, and run AlgoGuard from a terminal with Administrator rights. Without them, the monitor lists live capture as unavailable with the reason, and replay sources continue to work.
+
+Storage modes bound how much the session writes to SQLite:
+
+- **Session only** stores nothing; the feed is live output alone.
+- **Save attacks** (default) stores only attack flows, each with a prediction and an alert.
+- **Save every flow** stores every classification.
+
+Persisting sessions stop writing after 300 records and mark themselves capped; classification continues. Stored flows are tagged `live_monitor` (replay sources) or `live_capture` (live interface) in `network_traffic`, so monitoring traffic stays distinguishable from manual predictions. Flows from packet sources store their real endpoint addresses and ports; CSV replay rows keep cosmetic private-range endpoints, since the samples carry no addresses.
+
+One monitoring session runs per process. The artifact is loaded once when a session starts, so a redeployment mid-session is picked up the next time the monitor is started.
+
+## Retrain and Deploy
+
+Training is a terminal task, not a web page:
+
+```powershell
+python train.py datasets\algoguard_big.csv
+python train.py datasets\algoguard_big.csv --deploy
+python train.py my_traffic.csv --deploy --admin your_admin
+```
+
+Without `--deploy`, the run trains and ranks all six candidates, writes `reports/training_run_<id>_model_results.csv`, and prints the comparison table without touching the active model. With `--deploy`, the Stacking Ensemble is promoted only if it passes the quality gate; the five individual models are comparison results and can never be deployed. Deployment saves the Stacking pipeline, model identity, source run, metric summary, and deployment timestamp to `saved_models/deployed_model.joblib` and records the active deployment in SQLite.
 
 The default minimums are Accuracy 70%, F1-score 70%, and ROC-AUC 70%. They can be configured before startup with `ALGOGUARD_MIN_STACKING_ACCURACY`, `ALGOGUARD_MIN_STACKING_F1`, and `ALGOGUARD_MIN_STACKING_ROC_AUC`. Values are percentages from 0 to 100.
 
-Artifacts from earlier deployment workflows are intentionally treated as legacy. After upgrading, upload and train a new dataset to create a `stacking-five-v3` artifact; an older individual or Stacking artifact cannot be reactivated under the current policy.
+Artifacts from earlier deployment workflows are intentionally treated as legacy. After upgrading, run `train.py` on a dataset to create a `stacking-five-v3` artifact; an older individual or Stacking artifact cannot be reactivated under the current policy.
 
-The Prediction page builds its fields from the active artifact's saved feature schema. A prediction stores Normal or Attack, confidence, model name, timestamp, latency, and alert status. Attack creates an alert and audit events; Normal does not create an attack alert.
+## Manual Prediction
+
+The Prediction page builds its fields from the active artifact's saved feature schema. A prediction stores Normal or Attack, confidence, model name, timestamp, latency, and alert status. Attack creates an alert and audit events; Normal does not create an attack alert. The same path is available as JSON at `POST /predict` for an authenticated session.
 
 ## System Logs and Alerts
 
-Alert History contains anomalous predictions. System Logs contain authentication, upload, validation, preprocessing, training, ranking, deployment, prediction, reporting, and application events. Logs are newest first and support date, module, status, model, run ID, and text filters.
+Alert History contains anomalous predictions from both the Live Monitor and manual prediction. System Logs contain authentication, validation, preprocessing, training, ranking, deployment, live monitoring, prediction, reporting, and application events. Logs are newest first and support date, module, status, model, run ID, and text filters.
 
 ## Quality Assurance
 
@@ -187,7 +248,7 @@ Install QA tools and run all checks:
 
 ```powershell
 python -m pip install -r requirements-dev.txt
-python -m ruff check app.py migrate.py services tests
+python -m ruff check app.py train.py migrate.py services tests
 python -m pytest -q
 ```
 
@@ -197,12 +258,16 @@ python -m pytest -q
 
 Invalid CSV: confirm the file is CSV, the target is last, exactly two target classes exist, and both classes have enough rows.
 
-No active deployment: finish a valid training run, confirm Stacking passed the quality gate, and explicitly deploy Stacking.
+No active deployment: run `python train.py <csv> --deploy` and confirm Stacking passed the quality gate.
 
-Missing artifact: the database record and `saved_models/deployed_model.joblib` must agree. Redeploy an eligible Stacking result from Training Runs.
+Missing artifact: the database record and `saved_models/deployed_model.joblib` must agree. Redeploy with `python train.py <csv> --deploy`.
+
+Live Monitor will not start: a session is already running, so stop it first. If it reports an error immediately, the deployed artifact is missing or does not match the deployment record.
+
+Live capture unavailable: install Npcap (Windows) and run AlgoGuard with Administrator rights, then reload the Monitor page. If a capture starts but classifies nothing, confirm the selected interface is the one carrying traffic; flows appear when they end (TCP teardown or 15 seconds of idle), not on the first packet.
 
 Forgot local password: do not delete a database containing needed records. For a disposable new local installation only, recreate the database and seed credentials. Production-style password reset administration is outside this prototype's scope.
 
 ## Scope
 
-AlgoGuard is intended for academic and controlled local use. Model quality depends on representative, correctly labeled data. It is not a replacement for a production IDS/IPS, live capture agent, or security operations platform.
+AlgoGuard is intended for academic and controlled local use. Model quality depends on representative, correctly labeled data. It captures and classifies traffic on a single host, stores flow metadata only, and never blocks traffic or inspects payloads; it is not a replacement for a production IDS/IPS or a security operations platform.

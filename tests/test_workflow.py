@@ -1,4 +1,3 @@
-import io
 import json
 import sqlite3
 
@@ -69,15 +68,6 @@ def synthetic_results():
     return {"model_results": results, "best_model": results[0]}
 
 
-def post_csv(client, frame, filename):
-    payload = frame.to_csv(index=False).encode("utf-8")
-    return client.post(
-        "/upload",
-        data={"dataset": (io.BytesIO(payload), filename)},
-        content_type="multipart/form-data",
-    )
-
-
 def model_id_for(run_id, model_name):
     with db.get_connection() as connection:
         row = connection.execute(
@@ -88,61 +78,23 @@ def model_id_for(run_id, model_name):
         return row["model_id"]
 
 
-def test_each_csv_upload_creates_one_independent_run(
-    authenticated_client,
-    app_module,
-    binary_dataframe,
-    monkeypatch,
-):
-    monkeypatch.setattr(
-        app_module, "train_and_compare_models", lambda *args, **kwargs: synthetic_results()
-    )
-    before = db.list_training_runs()["total"]
-
-    first = post_csv(authenticated_client, binary_dataframe.iloc[:64], "first.csv")
-    second = post_csv(authenticated_client, binary_dataframe.iloc[32:], "second.csv")
-
-    assert first.status_code == 302
-    assert second.status_code == 302
-    history = db.list_training_runs()
-    assert history["total"] == before + 2
-    newest, previous = history["items"][:2]
-    assert newest["filename"] == "second.csv"
-    assert previous["filename"] == "first.csv"
-    assert newest["row_count"] == len(binary_dataframe.iloc[32:])
-    assert previous["row_count"] == len(binary_dataframe.iloc[:64])
-    assert newest["model_result_count"] == 6
-    assert previous["model_result_count"] == 6
+def test_synthetic_results_cover_every_registered_model():
+    results = synthetic_results()["model_results"]
+    assert len(results) == len(MODEL_IDS)
+    assert sum(1 for result in results if result["model_type"] == "ensemble") == 1
 
 
-def test_one_class_upload_fails_safely(authenticated_client, binary_dataframe):
-    one_class = binary_dataframe[binary_dataframe["label"] == "Normal"]
-    response = post_csv(authenticated_client, one_class, "one_class.csv")
-    assert response.status_code == 302
-    run = db.get_latest_training_run()
-    assert run["validation_status"] == "failed"
-    assert run["training_status"] == "failed"
-    assert "exactly two" in run["error_message"]
-
-
-def test_top_individual_cannot_be_deployed(
-    authenticated_client,
-    trained_bundle,
-):
+def test_top_individual_cannot_be_deployed(trained_bundle):
     best_name = trained_bundle["result"]["best_model"]["model_name"]
     model_id = model_id_for(trained_bundle["run_id"], best_name)
 
     with pytest.raises(DeploymentError, match="Only the evaluated Stacking Ensemble"):
         deploy_model(model_id, 1)
 
-    response = authenticated_client.post(f"/runs/{trained_bundle['run_id']}/deploy/{model_id}")
-    assert response.status_code == 302
 
-
-def test_eligible_stacking_can_be_deployed(authenticated_client, trained_bundle):
+def test_eligible_stacking_can_be_deployed(trained_bundle):
     model_id = model_id_for(trained_bundle["run_id"], "Stacking Ensemble")
-    response = authenticated_client.post(f"/runs/{trained_bundle['run_id']}/deploy/{model_id}")
-    assert response.status_code == 302
+    deploy_model(model_id, 1)
     active = db.get_active_deployment()
     assert active["model_id"] == model_id
     assert active["model_name"] == "Stacking Ensemble"
@@ -247,24 +199,20 @@ def test_stacking_quality_gate_blocks_failed_training_run():
     assert "training run must complete successfully" in reason
 
 
-def test_results_ui_separates_comparison_from_stacking_deployment(
-    authenticated_client,
-    app_module,
-    trained_bundle,
-    monkeypatch,
-):
-    monkeypatch.setattr(app_module, "get_active_deployment", lambda: None)
-    response = authenticated_client.get(f"/runs/{trained_bundle['run_id']}")
+def test_dashboard_reports_detection_activity(authenticated_client, trained_bundle):
+    deploy_stacking(trained_bundle)
+    authenticated_client.post("/predict", json=payload_for_prediction(trained_bundle, 1))
+    stats = db.get_detection_stats()
+    response = authenticated_client.get("/")
     html = response.get_data(as_text=True)
 
     assert response.status_code == 200
-    assert "Top Individual" in html
-    assert "Final Deployment Framework" in html
-    assert "Quality Gate Passed" in html
-    assert "Deploy Stacking" in html
-    assert "Deploy Best Model" not in html
+    assert stats["total_flows"] >= 1
+    assert stats["attack_count"] >= 1
+    assert "Deployed Model" in html
     assert "Stacking Ensemble" in html
-    assert "Not ranked" in html
+    assert "Flows Analyzed" in html
+    assert "Model Comparison Snapshot" not in html
 
 
 def payload_for_prediction(trained_bundle, expected_class):
@@ -335,21 +283,26 @@ def test_system_logs_ui_loads_and_filters(authenticated_client, trained_bundle):
 
 
 def test_required_log_categories_are_recorded(authenticated_client, trained_bundle):
-    model_id = model_id_for(trained_bundle["run_id"], "Stacking Ensemble")
-    authenticated_client.post(f"/runs/{trained_bundle['run_id']}/deploy/{model_id}")
+    from train import _deploy_stacking
+
+    assert _deploy_stacking(trained_bundle["run_id"], 1) is True
     modules = {row["module"] for row in db.list_system_logs(page=1, per_page=100)["items"]}
     assert {"Authentication", "Dataset", "Training", "Deployment"}.issubset(modules)
 
 
 def test_authenticated_flask_pages_smoke(authenticated_client, trained_bundle):
+    deploy_stacking(trained_bundle)
     paths = [
         "/",
-        "/upload",
-        "/history",
-        f"/runs/{trained_bundle['run_id']}",
+        "/monitor",
         "/simulation",
         "/alerts",
         "/logs",
         "/admins",
     ]
     assert all(authenticated_client.get(path).status_code == 200 for path in paths)
+
+
+def test_removed_training_routes_are_gone(authenticated_client):
+    for path in ("/upload", "/history", "/results", "/runs/1"):
+        assert authenticated_client.get(path).status_code == 404

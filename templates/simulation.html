@@ -9,9 +9,9 @@
         <h1>Prediction Demo</h1>
         <p class="header-copy">Classify one network flow with the active deployed AlgoGuard model.</p>
     </div>
-    <a class="btn btn-outline-light" href="{{ url_for('upload_dataset') }}">
-        <i class="bi bi-upload"></i>
-        Dataset Mode
+    <a class="btn btn-outline-light" href="{{ url_for('live_monitor') }}">
+        <i class="bi bi-broadcast"></i>
+        Live Monitor
     </a>
 </section>
 
@@ -20,7 +20,8 @@
     <i class="bi bi-cloud-slash"></i>
     <h2>No active deployment</h2>
     <p>{{ schema.message }}</p>
-    <a class="btn btn-accent" href="{{ url_for('training_history') }}">Open Training Runs</a>
+    <p class="monitor-hint">Deploy the Stacking Ensemble from a terminal with <code>python train.py datasets/algoguard_big.csv --deploy</code>.</p>
+    <a class="btn btn-accent" href="{{ url_for('dashboard') }}">Back to Dashboard</a>
 </section>
 {% else %}
 <section class="simulation-layout">

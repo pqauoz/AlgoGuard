@@ -1,68 +1,46 @@
 import os
 import sqlite3
-import threading
-import time
-from datetime import datetime, timezone
 from urllib.parse import urlsplit
-from uuid import UUID, uuid4
 
-import pandas as pd
 from flask import Flask, flash, jsonify, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash
-from werkzeug.utils import secure_filename
 
 from services.database_service import (
     DATABASE_FOLDER,
     create_admin,
-    create_training_run,
     get_active_deployment,
     get_admin_by_username,
+    get_detection_stats,
     get_latest_prediction,
-    get_latest_training_run,
     get_log_filter_options,
-    get_model_result,
-    get_training_run,
     initialize_database,
     insert_alert,
     insert_network_traffic_from_flow,
     insert_prediction,
-    insert_report,
     list_admins,
     list_alerts,
-    list_model_results,
     list_system_logs,
-    list_training_runs,
     log_system_event,
     mark_prediction_alert_created,
-    save_training_results,
-    update_training_run,
-    utc_now,
 )
-from services.deployment_service import (
-    STACKING_QUALITY_THRESHOLDS,
-    DeploymentError,
-    deploy_model,
-    stacking_deployment_eligibility,
+from services.live_monitor_service import (
+    LiveMonitorError,
+    get_options,
+    get_status,
+    pause_session,
+    resume_session,
+    start_session,
+    stop_session,
 )
-from services.model_registry import MODEL_IDS, STACKING_MODEL_NAME
-from services.preprocessing_service import prepare_dataset
 from services.simulation_service import (
     SimulationServiceError,
     get_simulation_schema,
     run_simulation,
 )
-from services.training_service import train_and_compare_models
-
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads")
 SAVED_MODEL_FOLDER = os.path.join(BASE_DIR, "saved_models")
-REPORT_FOLDER = os.path.join(BASE_DIR, "reports")
-ALLOWED_EXTENSIONS = {"csv"}
 ADMIN_ROLES = ("Administrator", "Analyst")
-TRAINING_PROGRESS_TTL_SECONDS = 60 * 60
-TRAINING_PROGRESS = {}
-TRAINING_PROGRESS_LOCK = threading.Lock()
 
 
 app = Flask(__name__)
@@ -70,110 +48,13 @@ app.config["SECRET_KEY"] = os.environ.get("ALGOGUARD_SECRET_KEY", "algoguard-dev
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = os.environ.get("ALGOGUARD_SECURE_COOKIES", "0") == "1"
-app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 app.config["SAVED_MODEL_FOLDER"] = SAVED_MODEL_FOLDER
-app.config["REPORT_FOLDER"] = REPORT_FOLDER
-app.config["MAX_CONTENT_LENGTH"] = 256 * 1024 * 1024
 
 
 def ensure_runtime_folders():
-    for folder in (UPLOAD_FOLDER, SAVED_MODEL_FOLDER, REPORT_FOLDER, DATABASE_FOLDER):
+    capture_folder = os.path.join(BASE_DIR, "captures")
+    for folder in (SAVED_MODEL_FOLDER, DATABASE_FOLDER, capture_folder):
         os.makedirs(folder, exist_ok=True)
-
-
-def allowed_file(filename):
-    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
-
-
-def _canonical_progress_token(value):
-    try:
-        return str(UUID(str(value or "")))
-    except (TypeError, ValueError, AttributeError):
-        return None
-
-
-def _set_training_progress(
-    progress_token,
-    admin_id,
-    percent,
-    stage,
-    detail="",
-    state="running",
-):
-    """Store short-lived progress for the upload page's polling endpoint."""
-    token = _canonical_progress_token(progress_token)
-    if not token:
-        return
-
-    now = time.time()
-    with TRAINING_PROGRESS_LOCK:
-        expired = [
-            key
-            for key, value in TRAINING_PROGRESS.items()
-            if now - value["updated_at"] > TRAINING_PROGRESS_TTL_SECONDS
-        ]
-        for key in expired:
-            TRAINING_PROGRESS.pop(key, None)
-        TRAINING_PROGRESS[token] = {
-            "admin_id": admin_id,
-            "percent": max(0, min(int(percent), 100)),
-            "stage": str(stage),
-            "detail": str(detail or ""),
-            "state": state,
-            "updated_at": now,
-        }
-
-
-def _get_training_progress(progress_token):
-    token = _canonical_progress_token(progress_token)
-    if not token:
-        return None
-    with TRAINING_PROGRESS_LOCK:
-        progress = TRAINING_PROGRESS.get(token)
-        return dict(progress) if progress else None
-
-
-def save_uploaded_file(uploaded_file):
-    original_name = secure_filename(uploaded_file.filename)
-    if not original_name:
-        raise ValueError("The uploaded CSV filename is invalid.")
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-    stored_name = f"{timestamp}_{uuid4().hex[:8]}_{original_name}"
-    file_path = os.path.join(app.config["UPLOAD_FOLDER"], stored_name)
-    uploaded_file.save(file_path)
-    return file_path, original_name, stored_name
-
-
-def save_report(run_id, model_results):
-    rows = []
-    for result in model_results:
-        normalized = result.get("normalized_metrics") or {}
-        rows.append(
-            {
-                "rank": result.get("rank"),
-                "model_name": result.get("model_name"),
-                "model_type": result.get("model_type"),
-                "status": result.get("status"),
-                "accuracy": result.get("accuracy"),
-                "precision": result.get("precision"),
-                "recall": result.get("recall"),
-                "f1_score": result.get("f1_score"),
-                "roc_auc": result.get("roc_auc"),
-                "false_positive_rate": result.get("false_positive_rate"),
-                "cpu_time_seconds": result.get("cpu_usage"),
-                "peak_ram_increase_mb": result.get("ram_usage"),
-                "model_size_mb": result.get("model_size"),
-                **{f"normalized_{key}": value for key, value in normalized.items()},
-                "overall_score": result.get("overall_score"),
-                "error_message": result.get("error_message"),
-            }
-        )
-    report_name = f"training_run_{run_id}_model_results.csv"
-    pd.DataFrame(rows).to_csv(
-        os.path.join(app.config["REPORT_FOLDER"], report_name),
-        index=False,
-    )
-    return report_name
 
 
 def current_admin_id():
@@ -215,21 +96,6 @@ def _log(
         model_name=model_name,
         prediction_id=prediction_id,
     )
-
-
-def _training_logger(run_id, filename):
-    def logger(module, action, status, model_name=None, message=None):
-        _log(
-            module,
-            action,
-            status,
-            message=message,
-            run_id=run_id,
-            dataset_filename=filename,
-            model_name=model_name,
-        )
-
-    return logger
 
 
 def _execute_prediction(payload, log_module):
@@ -320,6 +186,16 @@ def _execute_prediction(payload, log_module):
         raise
 
 
+JSON_ENDPOINTS = {
+    "predict_api",
+    "monitor_start",
+    "monitor_pause",
+    "monitor_resume",
+    "monitor_stop",
+    "monitor_status",
+}
+
+
 @app.before_request
 def require_admin_login():
     public_endpoints = {"login", "static"}
@@ -327,7 +203,7 @@ def require_admin_login():
         return None
     if current_admin_id():
         return None
-    if request.endpoint == "predict_api":
+    if request.endpoint in JSON_ENDPOINTS:
         return jsonify({"status": "error", "message": "Login required."}), 401
     return redirect(
         url_for("login", next=request.full_path if request.query_string else request.path)
@@ -346,19 +222,6 @@ def prevent_dynamic_page_caching(response):
     return response
 
 
-@app.errorhandler(413)
-def upload_too_large(_error):
-    if current_admin_id():
-        _log(
-            "Dataset",
-            "validation_failed",
-            "Failed",
-            message="Upload rejected because it exceeds the 256 MB limit.",
-        )
-    flash("The selected CSV exceeds the 256 MB upload limit.", "danger")
-    return redirect(url_for("upload_dataset"))
-
-
 @app.errorhandler(sqlite3.DatabaseError)
 def database_error(error):
     app.logger.error("AlgoGuard database error: %s", error)
@@ -373,7 +236,7 @@ def database_error(error):
         )
     except sqlite3.DatabaseError:
         pass
-    if request.endpoint == "predict_api":
+    if request.endpoint in JSON_ENDPOINTS:
         return jsonify({"status": "error", "message": "A database operation failed."}), 500
     flash("A database operation failed. No destructive recovery was attempted.", "danger")
     return redirect(url_for("dashboard"))
@@ -470,445 +333,78 @@ def manage_admins():
 @app.route("/")
 def dashboard():
     logs = list_system_logs(page=1, per_page=5)
-    latest_run = get_latest_training_run()
-    active_deployment = get_active_deployment()
-    active_stacking_deployment = (
-        active_deployment
-        if active_deployment and active_deployment.get("model_name") == STACKING_MODEL_NAME
-        else None
-    )
-    model_results = list_model_results(latest_run["run_id"]) if latest_run else []
-    stacking_model = next(
-        (model for model in model_results if model.get("model_name") == STACKING_MODEL_NAME),
-        None,
-    )
-    stacking_eligible, stacking_eligibility_reason = stacking_deployment_eligibility(stacking_model)
     return render_template(
         "dashboard.html",
-        latest_run=latest_run,
-        model_results=model_results,
-        stacking_model=stacking_model,
-        stacking_eligible=stacking_eligible,
-        stacking_eligibility_reason=stacking_eligibility_reason,
-        active_deployment=active_stacking_deployment,
+        active_deployment=get_active_deployment(),
+        stats=get_detection_stats(),
         latest_prediction=get_latest_prediction(),
         latest_alerts=list_alerts(limit=5),
         latest_logs=logs["items"],
     )
 
 
-@app.route("/upload", methods=["GET", "POST"])
-def upload_dataset():
-    if request.method == "GET":
-        models = [
-            {
-                "name": name,
-                "type": "Individual" if index < 5 else "Ensemble",
-            }
-            for index, name in enumerate(MODEL_IDS.values())
-        ]
-        progress_token = str(uuid4())
-        _set_training_progress(
-            progress_token,
-            current_admin_id(),
-            0,
-            "Ready to upload",
-            "Choose a CSV dataset to begin.",
-            state="ready",
-        )
-        return render_template(
-            "upload.html",
-            models=models,
-            progress_token=progress_token,
-        )
-
-    uploaded_file = request.files.get("dataset")
-    filename = secure_filename(uploaded_file.filename) if uploaded_file else ""
-    progress_token = request.form.get("progress_token", "")
-    admin_id = current_admin_id()
-    _set_training_progress(
-        progress_token,
-        admin_id,
-        10,
-        "Upload received",
-        "Checking the selected file.",
-    )
-    _log(
-        "Dataset",
-        "csv_upload_started",
-        "Started",
-        message=f"CSV upload started for {filename or 'unnamed file'}.",
-        dataset_filename=filename or None,
-    )
-
-    if not uploaded_file or not uploaded_file.filename:
-        _set_training_progress(
-            progress_token,
-            admin_id,
-            100,
-            "Upload failed",
-            "No CSV file was selected.",
-            state="failed",
-        )
-        _log("Dataset", "validation_failed", "Failed", message="No CSV file selected.")
-        flash("Please choose one CSV file before starting analysis.", "danger")
-        return redirect(url_for("upload_dataset"))
-    if not allowed_file(uploaded_file.filename):
-        _set_training_progress(
-            progress_token,
-            admin_id,
-            100,
-            "Upload failed",
-            "AlgoGuard accepts CSV files only.",
-            state="failed",
-        )
-        _log(
-            "Dataset",
-            "validation_failed",
-            "Failed",
-            message="Upload rejected because the file is not CSV.",
-            dataset_filename=filename,
-        )
-        flash("Invalid file type. AlgoGuard accepts one CSV file per run.", "danger")
-        return redirect(url_for("upload_dataset"))
-
-    run_id = None
-    try:
-        file_path, original_name, stored_name = save_uploaded_file(uploaded_file)
-        run_id = create_training_run(current_admin_id(), original_name, stored_name)
-        _set_training_progress(
-            progress_token,
-            admin_id,
-            14,
-            "Dataset saved",
-            f"Training run #{run_id} has been created.",
-        )
-        logger = _training_logger(run_id, original_name)
-        _log(
-            "Dataset",
-            "upload_completed",
-            "Success",
-            message=f"Uploaded {original_name} as independent run {run_id}.",
-            run_id=run_id,
-            dataset_filename=original_name,
-        )
-        _log(
-            "Training",
-            "training_run_created",
-            "Success",
-            message=f"Training run {run_id} created.",
-            run_id=run_id,
-            dataset_filename=original_name,
-        )
-
-        update_training_run(run_id, validation_status="in_progress")
-        _set_training_progress(
-            progress_token,
-            admin_id,
-            18,
-            "Validating dataset",
-            "Checking columns, target labels, and class balance.",
-        )
-        _log(
-            "Dataset",
-            "validation_started",
-            "Started",
-            message="CSV validation started.",
-            run_id=run_id,
-            dataset_filename=original_name,
-        )
-        update_training_run(run_id, preprocessing_status="in_progress")
-        _log(
-            "Dataset",
-            "preprocessing_started",
-            "Started",
-            message="Leakage-safe preprocessing preparation started.",
-            run_id=run_id,
-            dataset_filename=original_name,
-        )
-
-        try:
-            prepared = prepare_dataset(file_path)
-        except ValueError as error:
-            _set_training_progress(
-                progress_token,
-                admin_id,
-                100,
-                "Validation failed",
-                str(error),
-                state="failed",
-            )
-            update_training_run(
-                run_id,
-                validation_status="failed",
-                preprocessing_status="failed",
-                training_status="failed",
-                completed_at=utc_now(),
-                error_message=str(error),
-            )
-            _log(
-                "Dataset",
-                "validation_failed",
-                "Failed",
-                message=str(error),
-                run_id=run_id,
-                dataset_filename=original_name,
-            )
-            _log(
-                "Dataset",
-                "preprocessing_failed",
-                "Failed",
-                message="Preprocessing was not completed because validation failed.",
-                run_id=run_id,
-                dataset_filename=original_name,
-            )
-            flash(str(error), "danger")
-            return redirect(url_for("training_results", run_id=run_id))
-
-        update_training_run(
-            run_id,
-            row_count=prepared.summary["rows"],
-            feature_count=prepared.summary["features"],
-            normal_count=prepared.summary["normal_count"],
-            anomaly_count=prepared.summary["anomaly_count"],
-            target_column=prepared.summary["target_column"],
-            class_distribution=prepared.summary["label_counts"],
-            validation_status="passed",
-            preprocessing_status="completed",
-            training_status="in_progress",
-        )
-        _set_training_progress(
-            progress_token,
-            admin_id,
-            25,
-            "Preprocessing complete",
-            (
-                f"Prepared {prepared.summary['rows']:,} rows and "
-                f"{prepared.summary['features']} features."
-            ),
-        )
-        _log(
-            "Dataset",
-            "validation_passed",
-            "Success",
-            message="CSV validation passed for binary Normal/Attack training.",
-            run_id=run_id,
-            dataset_filename=original_name,
-        )
-        _log(
-            "Dataset",
-            "preprocessing_completed",
-            "Success",
-            message="Train/test split and preprocessing schema completed.",
-            run_id=run_id,
-            dataset_filename=original_name,
-        )
-
-        def update_model_progress(completed, total, model_name, status):
-            percent = 25 + round((completed / total) * 60)
-            if status == "started":
-                stage = f"Training {model_name}"
-                detail = f"Model {completed + 1} of {total} is running."
-            else:
-                stage = f"Finished {model_name}"
-                detail = f"{completed} of {total} model attempts completed."
-            _set_training_progress(
-                progress_token,
-                admin_id,
-                percent,
-                stage,
-                detail,
-            )
-
-        results = train_and_compare_models(
-            prepared,
-            app.config["SAVED_MODEL_FOLDER"],
-            run_id,
-            event_logger=logger,
-            progress_callback=update_model_progress,
-        )
-        _set_training_progress(
-            progress_token,
-            admin_id,
-            90,
-            "Ranking individual models",
-            "Comparing the five individual models across nine normalized metrics.",
-        )
-        _log(
-            "Training",
-            "metric_calculation_completed",
-            "Success",
-            message="Raw metrics calculated for all completed candidates.",
-            run_id=run_id,
-            dataset_filename=original_name,
-        )
-        save_training_results(run_id, results["model_results"], results["best_model"])
-        report_name = save_report(run_id, results["model_results"])
-        insert_report(current_admin_id(), "Model Performance", run_id=run_id)
-        _set_training_progress(
-            progress_token,
-            admin_id,
-            97,
-            "Saving results",
-            "Writing model records and the performance report.",
-        )
-        _log(
-            "Reports",
-            "report_generated",
-            "Success",
-            message=f"Generated {report_name}.",
-            run_id=run_id,
-            dataset_filename=original_name,
-        )
-
-        if results["best_model"]:
-            flash(
-                (
-                    f"Run {run_id} completed. {results['best_model']['model_name']} "
-                    "leads the individual comparison. Review Stacking for deployment."
-                ),
-                "success",
-            )
-        else:
-            flash("Training finished, but no candidate completed all required metrics.", "warning")
-        _set_training_progress(
-            progress_token,
-            admin_id,
-            100,
-            "Analysis complete",
-            "Opening the training results.",
-            state="complete",
-        )
-        return redirect(url_for("training_results", run_id=run_id))
-
-    except Exception as error:
-        _set_training_progress(
-            progress_token,
-            admin_id,
-            100,
-            "Analysis failed",
-            str(error),
-            state="failed",
-        )
-        if run_id:
-            update_training_run(
-                run_id,
-                training_status="failed",
-                completed_at=utc_now(),
-                error_message=str(error),
-            )
-        _log(
-            "Application",
-            "application_error",
-            "Failed",
-            message=f"Training workflow failed: {error}",
-            run_id=run_id,
-            dataset_filename=filename or None,
-        )
-        flash(f"AlgoGuard could not complete this run: {error}", "danger")
-        return redirect(
-            url_for("training_results", run_id=run_id) if run_id else url_for("upload_dataset")
-        )
-
-
-@app.route("/training-progress/<progress_token>")
-def training_progress(progress_token):
-    progress = _get_training_progress(progress_token)
-    if not progress or progress["admin_id"] != current_admin_id():
-        return jsonify({"status": "error", "message": "Progress session not found."}), 404
-    progress.pop("admin_id", None)
-    progress.pop("updated_at", None)
-    return jsonify({"status": "success", **progress})
-
-
-@app.route("/results")
-def results():
-    latest = get_latest_training_run()
-    if not latest:
-        flash("Upload one CSV to create a training run.", "warning")
-        return redirect(url_for("upload_dataset"))
-    return redirect(url_for("training_results", run_id=latest["run_id"]))
-
-
-@app.route("/runs/<int:run_id>")
-def training_results(run_id):
-    training_run = get_training_run(run_id)
-    if not training_run:
-        flash("Training run not found.", "danger")
-        return redirect(url_for("training_history"))
-    model_results = list_model_results(run_id)
-    stacking_model = next(
-        (model for model in model_results if model.get("model_name") == STACKING_MODEL_NAME),
-        None,
-    )
-    stacking_eligible, stacking_eligibility_reason = stacking_deployment_eligibility(stacking_model)
+@app.route("/monitor")
+def live_monitor():
+    schema = get_simulation_schema()
     return render_template(
-        "results.html",
-        training_run=training_run,
-        model_results=model_results,
-        stacking_model=stacking_model,
-        stacking_eligible=stacking_eligible,
-        stacking_eligibility_reason=stacking_eligibility_reason,
-        stacking_quality_thresholds=STACKING_QUALITY_THRESHOLDS,
-        active_deployment=get_active_deployment(),
+        "monitor.html",
+        available=schema.get("available", False),
+        unavailable_message=schema.get("message"),
+        deployment=schema.get("deployment"),
+        options=get_options(),
+        initial_status=get_status(),
     )
 
 
-@app.route("/history")
-def training_history():
-    page = request.args.get("page", 1, type=int)
-    return render_template("history.html", runs=list_training_runs(page=page, per_page=20))
-
-
-@app.route("/runs/<int:run_id>/deploy/<int:model_id>", methods=["POST"])
-def deploy_training_model(run_id, model_id):
-    model = get_model_result(model_id)
-    if not model or model.get("run_id") != run_id:
-        flash("The selected model does not belong to this training run.", "danger")
-        return redirect(url_for("training_results", run_id=run_id))
-
-    _log(
-        "Deployment",
-        "deployment_started",
-        "Started",
-        message=f"Deployment started for {model['model_name']}.",
-        run_id=run_id,
-        dataset_filename=model.get("filename"),
-        model_name=model["model_name"],
-    )
+def _monitor_json(callback, action, success_message):
+    """Run one monitor control action and answer the page with JSON."""
     try:
-        deployed = deploy_model(model_id, current_admin_id())
-        previous = deployed["deployment"].get("previous")
-        if previous:
-            _log(
-                "Deployment",
-                "previous_deployed_model_replaced",
-                "Success",
-                message=f"Previous deployment {previous['deployment_id']} was replaced.",
-                run_id=run_id,
-                model_name=model["model_name"],
-            )
-        _log(
-            "Deployment",
-            "model_deployed",
-            "Success",
-            message=f"{model['model_name']} is now the active model.",
-            run_id=run_id,
-            dataset_filename=model.get("filename"),
-            model_name=model["model_name"],
-        )
-        flash(f"{model['model_name']} is now deployed.", "success")
-    except DeploymentError as error:
-        _log(
-            "Deployment",
-            "deployment_failed",
-            "Failed",
-            message=str(error),
-            run_id=run_id,
-            model_name=model["model_name"],
-        )
-        flash(str(error), "danger")
-    return redirect(url_for("training_results", run_id=run_id))
+        monitor_session = callback()
+    except LiveMonitorError as error:
+        _log("Live Monitor", f"{action}_failed", "Failed", message=str(error))
+        return jsonify({"status": "error", "message": str(error)}), 409
+    _log("Live Monitor", action, "Success", message=success_message)
+    return jsonify({"status": "success", "session": monitor_session})
+
+
+@app.route("/monitor/start", methods=["POST"])
+def monitor_start():
+    payload = request.get_json(silent=True) or {}
+    defaults = get_options()["defaults"]
+    return _monitor_json(
+        lambda: start_session(
+            current_admin_id(),
+            source_type=payload.get("source_type", defaults["source_type"]),
+            dataset=payload.get("dataset", defaults["dataset"]),
+            capture_file=payload.get("capture_file"),
+            interface=payload.get("interface"),
+            speed=payload.get("speed", defaults["speed"]),
+            order=payload.get("order", defaults["order"]),
+            persist=payload.get("persist", defaults["persist"]),
+        ),
+        "monitor_start_requested",
+        "Live monitoring session requested.",
+    )
+
+
+@app.route("/monitor/pause", methods=["POST"])
+def monitor_pause():
+    return _monitor_json(pause_session, "monitor_paused", "Live monitoring paused.")
+
+
+@app.route("/monitor/resume", methods=["POST"])
+def monitor_resume():
+    return _monitor_json(resume_session, "monitor_resumed", "Live monitoring resumed.")
+
+
+@app.route("/monitor/stop", methods=["POST"])
+def monitor_stop():
+    return _monitor_json(stop_session, "monitor_stop_requested", "Live monitoring stopped.")
+
+
+@app.route("/monitor/status")
+def monitor_status():
+    return jsonify({"status": "success", **get_status(request.args.get("since", 0))})
 
 
 @app.route("/simulation", methods=["GET", "POST"])
@@ -975,4 +471,6 @@ initialize_database()
 if __name__ == "__main__":
     port = int(os.environ.get("ALGOGUARD_PORT", "5000"))
     debug = os.environ.get("FLASK_DEBUG", "1") == "1"
-    app.run(debug=debug, host="0.0.0.0", port=port, use_reloader=False)
+    # threaded=True keeps the live monitor's status polling responsive while a
+    # monitoring session is classifying flows in its background thread.
+    app.run(debug=debug, host="0.0.0.0", port=port, use_reloader=False, threaded=True)

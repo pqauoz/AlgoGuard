@@ -22,8 +22,7 @@
             <div class="collapse navbar-collapse" id="mainNav">
                 <ul class="navbar-nav ms-auto gap-xl-1">
                     <li class="nav-item"><a class="nav-link{% if request.endpoint == 'dashboard' %} active{% endif %}" href="{{ url_for('dashboard') }}"><i class="bi bi-grid-1x2"></i> Dashboard</a></li>
-                    <li class="nav-item"><a class="nav-link{% if request.endpoint == 'upload_dataset' %} active{% endif %}" href="{{ url_for('upload_dataset') }}"><i class="bi bi-upload"></i> Upload</a></li>
-                    <li class="nav-item"><a class="nav-link{% if request.endpoint in ['training_history', 'training_results'] %} active{% endif %}" href="{{ url_for('training_history') }}"><i class="bi bi-clock-history"></i> Runs</a></li>
+                    <li class="nav-item"><a class="nav-link{% if request.endpoint == 'live_monitor' %} active{% endif %}" href="{{ url_for('live_monitor') }}"><i class="bi bi-broadcast"></i> Live Monitor</a></li>
                     <li class="nav-item"><a class="nav-link{% if request.endpoint == 'simulation_demo' %} active{% endif %}" href="{{ url_for('simulation_demo') }}"><i class="bi bi-activity"></i> Predict</a></li>
                     <li class="nav-item"><a class="nav-link{% if request.endpoint == 'alert_history' %} active{% endif %}" href="{{ url_for('alert_history') }}"><i class="bi bi-exclamation-triangle-fill"></i> Alerts</a></li>
                     <li class="nav-item"><a class="nav-link{% if request.endpoint == 'system_logs' %} active{% endif %}" href="{{ url_for('system_logs') }}"><i class="bi bi-journal-text"></i> Logs</a></li>

@@ -7,7 +7,6 @@ from werkzeug.security import generate_password_hash
 
 from services.model_registry import MODEL_WORKFLOW_VERSION
 
-
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 DATABASE_FOLDER = os.path.join(BASE_DIR, "database")
 DATABASE_PATH = os.path.abspath(
@@ -200,6 +199,20 @@ def initialize_database():
                 flags TEXT,
                 dataset_source TEXT,
                 feature_payload TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS capture_session (
+                capture_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                admin_id INTEGER,
+                interface TEXT,
+                bpf_filter TEXT,
+                started_at TEXT NOT NULL,
+                finished_at TEXT,
+                packets_captured INTEGER NOT NULL DEFAULT 0,
+                packets_dropped INTEGER NOT NULL DEFAULT 0,
+                flows_emitted INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'running',
+                FOREIGN KEY (admin_id) REFERENCES admin (admin_id)
             );
 
             CREATE TABLE IF NOT EXISTS prediction (
@@ -854,6 +867,50 @@ def insert_network_traffic_from_flow(flow_data, dataset_source="simulation"):
         return cursor.lastrowid
 
 
+def insert_capture_session(admin_id, interface, bpf_filter):
+    """Record the start of one live packet-capture session."""
+    with get_connection() as connection:
+        cursor = connection.execute(
+            """
+            INSERT INTO capture_session (admin_id, interface, bpf_filter, started_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (admin_id, str(interface or "default"), str(bpf_filter or ""), utc_now()),
+        )
+        return cursor.lastrowid
+
+
+def finalize_capture_session(capture_id, packets_captured, packets_dropped, flows_emitted, status):
+    """Close a live capture session's record with its final counters."""
+    with get_connection() as connection:
+        connection.execute(
+            """
+            UPDATE capture_session
+            SET finished_at = ?, packets_captured = ?, packets_dropped = ?,
+                flows_emitted = ?, status = ?
+            WHERE capture_id = ?
+            """,
+            (
+                utc_now(),
+                int(packets_captured or 0),
+                int(packets_dropped or 0),
+                int(flows_emitted or 0),
+                str(status),
+                capture_id,
+            ),
+        )
+
+
+def list_capture_sessions(limit=50):
+    """Most recent live capture sessions, newest first."""
+    with get_connection() as connection:
+        rows = connection.execute(
+            "SELECT * FROM capture_session ORDER BY capture_id DESC LIMIT ?",
+            (int(limit),),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
 def insert_prediction(
     traffic_id,
     model_id,
@@ -943,6 +1000,59 @@ def get_latest_prediction():
             """
         ).fetchone()
         return dict(row) if row else None
+
+
+def get_detection_stats():
+    """Aggregate detection activity for the dashboard in one pass."""
+    with get_connection() as connection:
+        prediction_row = connection.execute(
+            """
+            SELECT
+                COUNT(*) AS total_flows,
+                SUM(CASE WHEN predicted_label = 'Attack' THEN 1 ELSE 0 END) AS attack_count,
+                SUM(CASE WHEN predicted_label = 'Normal' THEN 1 ELSE 0 END) AS normal_count,
+                AVG(latency_ms) AS avg_latency_ms,
+                AVG(confidence_score) AS avg_confidence,
+                MAX(prediction_timestamp) AS last_prediction_at
+            FROM prediction
+            """
+        ).fetchone()
+        alert_row = connection.execute(
+            """
+            SELECT
+                COUNT(*) AS alerts_total,
+                SUM(CASE WHEN alert_status = 'Open' THEN 1 ELSE 0 END) AS alerts_open
+            FROM alert
+            """
+        ).fetchone()
+
+    total_flows = int(prediction_row["total_flows"] or 0)
+    attack_count = int(prediction_row["attack_count"] or 0)
+    return {
+        "total_flows": total_flows,
+        "attack_count": attack_count,
+        "normal_count": int(prediction_row["normal_count"] or 0),
+        "attack_ratio": round((attack_count / total_flows) * 100, 2) if total_flows else 0.0,
+        "avg_latency_ms": _safe_float(prediction_row["avg_latency_ms"]),
+        "avg_confidence": _safe_float(prediction_row["avg_confidence"]),
+        "last_prediction_at": prediction_row["last_prediction_at"],
+        "alerts_total": int(alert_row["alerts_total"] or 0),
+        "alerts_open": int(alert_row["alerts_open"] or 0),
+    }
+
+
+def count_traffic_by_source():
+    """Return how many stored flows came from each ingest source."""
+    with get_connection() as connection:
+        rows = connection.execute(
+            """
+            SELECT dataset_source, COUNT(*) AS flow_count
+            FROM network_traffic
+            GROUP BY dataset_source
+            ORDER BY flow_count DESC
+            """
+        ).fetchall()
+        return [dict(row) for row in rows]
 
 
 def list_system_logs(filters=None, page=1, per_page=25):
