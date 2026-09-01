@@ -42,6 +42,7 @@ from services.traffic_source_service import (
     CsvReplaySource,
     LiveCaptureSource,
     PcapReplaySource,
+    TrafficSourceCancelled,
     TrafficSourceError,
     list_capture_files,
     list_capture_interfaces,
@@ -78,7 +79,7 @@ DEFAULT_PERSIST = "attacks"
 FEED_MAXLEN = 250
 MAX_EVENTS_PER_POLL = 100
 MAX_PERSISTED_PER_SESSION = 300
-ACTIVE_STATES = ("starting", "running", "paused")
+ACTIVE_STATES = ("starting", "running", "paused", "stopping")
 TERMINAL_STATES = ("idle", "stopped", "completed", "error")
 
 _LOCK = threading.RLock()
@@ -278,7 +279,7 @@ def _store_flow(deployment, flow_data, result, source_tag):
     return prediction_id, alert_id
 
 
-def _make_source(session):
+def _make_source(session, cancel_event=None):
     source_type = session["source_type"]
     if source_type == "csv":
         return CsvReplaySource(
@@ -289,6 +290,7 @@ def _make_source(session):
         return PcapReplaySource(
             _resolve_capture_path(session["source_name"]),
             order=session["order"],
+            cancel_event=cancel_event,
         )
     return LiveCaptureSource(session["source_name"])
 
@@ -311,6 +313,11 @@ def _worker(session, stop_event, pause_event):
         log_system_event(admin_id, "Live Monitor", "monitor_failed", "Failed", message=str(error))
         return
 
+    if stop_event.is_set():
+        with _LOCK:
+            session["state"] = "stopped"
+        return
+
     feature_columns = list(artifact.get("feature_columns") or [])
     numeric_columns = set(artifact.get("numeric_columns") or [])
     defaults = artifact.get("feature_defaults") or {}
@@ -324,7 +331,7 @@ def _worker(session, stop_event, pause_event):
 
     source = None
     try:
-        source = _make_source(session)
+        source = _make_source(session, cancel_event=stop_event)
         source.prepare()
         if source_type == "csv":
             missing = [column for column in feature_columns if column not in source.columns]
@@ -332,6 +339,12 @@ def _worker(session, stop_event, pause_event):
                 raise LiveMonitorError(
                     f"The traffic sample is missing required columns: {', '.join(missing)}."
                 )
+    except TrafficSourceCancelled:
+        with _LOCK:
+            session["state"] = "stopped"
+        if source is not None:
+            source.close()
+        return
     except (LiveMonitorError, TrafficSourceError) as error:
         with _LOCK:
             session["state"] = "error"
@@ -357,6 +370,12 @@ def _worker(session, stop_event, pause_event):
         pipeline.predict(pd.DataFrame([warmup_row], columns=feature_columns))
     except Exception:
         pass
+
+    if stop_event.is_set():
+        source.close()
+        with _LOCK:
+            session["state"] = "stopped"
+        return
 
     capture_id = None
     if source_type == "live":
@@ -624,12 +643,10 @@ def start_session(
         source_name = str(interface).strip() if interface else None
 
     with _LOCK:
-        if _SESSION and _SESSION["state"] in ACTIVE_STATES:
+        if (_THREAD and _THREAD.is_alive()) or (_SESSION and _SESSION["state"] in ACTIVE_STATES):
             raise LiveMonitorError("A monitoring session is already running. Stop it first.")
         _EVENTS.clear()
-        _SESSION = _new_session(
-            source_type, source_name, dataset, speed, order, persist, admin_id
-        )
+        _SESSION = _new_session(source_type, source_name, dataset, speed, order, persist, admin_id)
         _STOP_EVENT = threading.Event()
         _PAUSE_EVENT = threading.Event()
         _THREAD = threading.Thread(
@@ -675,7 +692,9 @@ def stop_session():
     if thread and thread.is_alive():
         thread.join(timeout=5)
     with _LOCK:
-        if session["state"] in ACTIVE_STATES:
+        if thread and thread.is_alive():
+            session["state"] = "stopping"
+        elif session["state"] in ACTIVE_STATES:
             session["state"] = "stopped"
         return _public_session(session)
 
@@ -700,9 +719,7 @@ def get_options():
     """Return the control choices the monitor page renders."""
     live_ok, live_reason = live_capture_available()
     return {
-        "sources": [
-            {"value": value, "label": label} for value, label in SOURCE_CHOICES.items()
-        ],
+        "sources": [{"value": value, "label": label} for value, label in SOURCE_CHOICES.items()],
         "datasets": [{"value": value, "label": label} for value, label in DATASET_CHOICES.items()],
         "captures": list_capture_files(),
         "interfaces": list_capture_interfaces() if live_ok else [],

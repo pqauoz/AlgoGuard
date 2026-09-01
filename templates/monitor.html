@@ -196,7 +196,7 @@
     const POLL_INTERVAL_MS = 700;
     const MAX_FEED_ROWS = 50;
     const MAX_BUCKETS = 80;
-    const ACTIVE_STATES = ["starting", "running", "paused"];
+    const ACTIVE_STATES = ["starting", "running", "paused", "stopping"];
 
     const startButton = document.getElementById("monitorStart");
     const pauseButton = document.getElementById("monitorPause");
@@ -224,6 +224,7 @@
     const liveHint = document.getElementById("liveUnavailableHint");
     const liveAvailable = {{ options.live_capture.available|tojson }};
     const canvas = document.getElementById("monitorChart");
+    let monitorIsActive = false;
 
     function updateSourceFields() {
         const type = controls.source.value;
@@ -235,12 +236,12 @@
         if (liveHint) {
             liveHint.hidden = type !== "live";
         }
-        startButton.disabled = startButton.disabled
-            || (type === "live" && !liveAvailable);
+        startButton.disabled = monitorIsActive || (type === "live" && !liveAvailable);
     }
 
     let lastSeq = 0;
     let pollTimer = null;
+    let pollInFlight = false;
     let buckets = [];
     let pendingBucket = { normal: 0, attack: 0 };
 
@@ -256,13 +257,14 @@
     function renderState(session) {
         const state = session.state || "idle";
         const isActive = ACTIVE_STATES.indexOf(state) !== -1;
+        monitorIsActive = isActive;
         statePill.textContent = state.charAt(0).toUpperCase() + state.slice(1);
         statePill.classList.toggle("active", state === "running");
         livePill.hidden = state !== "running";
 
         startButton.disabled = isActive;
         pauseButton.disabled = state !== "running" && state !== "paused";
-        stopButton.disabled = !isActive;
+        stopButton.disabled = !isActive || state === "stopping";
         pauseButton.innerHTML = state === "paused"
             ? '<i class="bi bi-play-fill"></i> Resume'
             : '<i class="bi bi-pause-fill"></i> Pause';
@@ -428,6 +430,10 @@
     }
 
     function poll() {
+        if (pollInFlight) {
+            return;
+        }
+        pollInFlight = true;
         fetch("{{ url_for('monitor_status') }}?since=" + lastSeq, { credentials: "same-origin" })
             .then(function (response) { return response.json(); })
             .then(function (data) {
@@ -446,6 +452,9 @@
             .catch(function () {
                 setMessage("Lost contact with the monitoring session.", true);
                 stopPolling();
+            })
+            .finally(function () {
+                pollInFlight = false;
             });
     }
 

@@ -250,14 +250,33 @@ class FlowTracker:
             del self._draining[drain_key]
         flow = self._flows.get(key)
 
-        if flow is not None and (info.ts - flow.first_ts) >= self.active_timeout:
-            emitted.append(_emit(flow, "active_timeout"))
+        # A 5-tuple reappearing after the idle timeout is a new flow: emit the
+        # stale one instead of merging two conversations into a single record.
+        if flow is not None and (info.ts - flow.last_ts) >= self.idle_timeout:
+            emitted.append(_emit(flow, "idle_timeout"))
             del self._flows[key]
             flow = None
             key, is_forward = (
                 (info.src_ip, info.src_port, info.dst_ip, info.dst_port, info.proto),
                 True,
             )
+
+        if flow is not None and (info.ts - flow.first_ts) >= self.active_timeout:
+            emitted.append(_emit(flow, "active_timeout"))
+            del self._flows[key]
+            # The next slice continues the same conversation, so it keeps the
+            # original orientation even when this packet travels dst-to-src;
+            # ``key`` and ``is_forward`` from the lookup stay valid.
+            flow = _FlowState(
+                src_ip=flow.src_ip,
+                dst_ip=flow.dst_ip,
+                src_port=flow.src_port,
+                dst_port=flow.dst_port,
+                proto=flow.proto,
+                first_ts=info.ts,
+                last_ts=info.ts,
+            )
+            self._flows[key] = flow
 
         if flow is None:
             flow = _FlowState(
@@ -328,6 +347,12 @@ class FlowTracker:
             return []
         self._last_sweep_ts = now_ts
 
+        # Drop drain markers whose grace window has passed, so completed
+        # connections do not accumulate for the lifetime of the tracker.
+        for key in list(self._draining):
+            if now_ts > self._draining[key]:
+                del self._draining[key]
+
         expired = []
         for key in list(self._flows):
             flow = self._flows[key]
@@ -344,6 +369,7 @@ class FlowTracker:
         """Emit every in-progress flow; used when a capture or replay ends."""
         remaining = [_emit(flow, "flush") for flow in self._flows.values()]
         self._flows.clear()
+        self._draining.clear()
         self.flows_emitted += len(remaining)
         return remaining
 

@@ -1,18 +1,20 @@
 """Tests for the Live Monitor's traffic sources, including PCAP replay."""
 
+import threading
 import time
 
 import pytest
+import scapy.all as scapy_all
 
+from services import traffic_source_service as traffic_sources
 from services import live_monitor_service as monitor
 from services.traffic_source_service import (
     CsvReplaySource,
     PcapReplaySource,
+    TrafficSourceCancelled,
     TrafficSourceError,
     live_capture_available,
 )
-
-scapy_all = pytest.importorskip("scapy.all", reason="scapy is required for packet tests")
 
 
 def write_sample_pcap(path, sessions=3):
@@ -54,12 +56,12 @@ def write_sample_pcap(path, sessions=3):
             frame.time = start + offset
             packets.append(frame)
 
-    query = Ether() / IP(src="192.168.1.50", dst="198.51.100.9", ttl=64) / UDP(
-        sport=40000, dport=53
+    query = (
+        Ether() / IP(src="192.168.1.50", dst="198.51.100.9", ttl=64) / UDP(sport=40000, dport=53)
     )
     query.time = base + 30.0
-    answer = Ether() / IP(src="198.51.100.9", dst="192.168.1.50", ttl=120) / UDP(
-        sport=53, dport=40000
+    answer = (
+        Ether() / IP(src="198.51.100.9", dst="192.168.1.50", ttl=120) / UDP(sport=53, dport=40000)
     )
     answer.time = base + 30.02
     packets.extend([query, answer])
@@ -106,6 +108,16 @@ def test_pcap_source_rejects_captures_without_ip_flows(tmp_path):
         source.prepare()
 
 
+def test_pcap_source_honors_cancellation_before_preparation(tmp_path):
+    pcap_path = write_sample_pcap(tmp_path / "cancelled.pcap", sessions=1)
+    cancel_event = threading.Event()
+    cancel_event.set()
+
+    source = PcapReplaySource(str(pcap_path), cancel_event=cancel_event)
+    with pytest.raises(TrafficSourceCancelled, match="cancelled"):
+        source.prepare()
+
+
 def test_csv_source_replays_rows_with_labels(tmp_path, trained_bundle):
     csv_path = tmp_path / "sample.csv"
     trained_bundle["frame"].to_csv(csv_path, index=False)
@@ -125,6 +137,18 @@ def test_live_capture_availability_reports_a_reason_when_unavailable():
     assert isinstance(available, bool)
     if not available:
         assert reason
+
+
+def test_windows_without_pcap_provider_disables_live_capture(monkeypatch):
+    from scapy.config import conf
+
+    monkeypatch.setattr(traffic_sources.os, "name", "nt")
+    monkeypatch.setattr(conf, "use_pcap", False)
+
+    available, reason = live_capture_available()
+
+    assert available is False
+    assert "Npcap" in reason
 
 
 def wait_for(condition, timeout=10.0):

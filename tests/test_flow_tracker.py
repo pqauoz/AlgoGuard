@@ -144,12 +144,81 @@ def test_idle_flows_expire_after_the_idle_timeout():
 def test_long_lived_flows_are_sliced_by_the_active_timeout():
     tracker = FlowTracker()
     emitted = []
-    for step in range(3):
-        ts = 1.0 + step * (ACTIVE_TIMEOUT_SECONDS / 2 + 1)
-        emitted.extend(
-            tracker.add_packet(tcp_packet(ts, CLIENT, SERVER, 52102, 80, flags="A"))
-        )
+    # Steady keepalive traffic: never idle, but alive past the active timeout.
+    ts = 1.0
+    while ts < ACTIVE_TIMEOUT_SECONDS + 12.0:
+        emitted.extend(tracker.add_packet(tcp_packet(ts, CLIENT, SERVER, 52102, 80, flags="A")))
+        ts += 10.0
     assert any(flow["end_reason"] == "active_timeout" for flow in emitted)
+
+
+def test_idle_gap_on_the_same_five_tuple_splits_into_two_flows():
+    tracker = FlowTracker()
+    emitted = tracker.add_packet(udp_packet(1000.0, CLIENT, SERVER, 40000, 53))
+    emitted.extend(
+        tracker.add_packet(
+            udp_packet(1000.0 + IDLE_TIMEOUT_SECONDS + 5.0, CLIENT, SERVER, 40000, 53)
+        )
+    )
+    emitted.extend(tracker.flush())
+
+    assert len(emitted) == 2
+    assert emitted[0]["end_reason"] == "idle_timeout"
+    assert emitted[0]["features"]["spkts"] == 1
+    assert emitted[0]["features"]["dur"] == 0.0
+    assert emitted[1]["features"]["spkts"] == 1
+    assert emitted[1]["features"]["dur"] == 0.0
+
+
+def test_active_timeout_slice_keeps_the_original_orientation():
+    tracker = FlowTracker()
+    emitted = []
+    c2s = {"src": CLIENT, "dst": SERVER, "sport": 52104, "dport": 80, "ttl": 62}
+    s2c = {"src": SERVER, "dst": CLIENT, "sport": 80, "dport": 52104, "ttl": 254}
+    ts = 0.0
+    while ts < ACTIVE_TIMEOUT_SECONDS:
+        emitted.extend(tracker.add_packet(tcp_packet(ts, flags="A", length=52, **c2s)))
+        emitted.extend(tracker.add_packet(tcp_packet(ts + 0.01, flags="A", length=1200, **s2c)))
+        ts += 10.0
+    # The packet that crosses the active timeout travels server-to-client.
+    emitted.extend(
+        tracker.add_packet(tcp_packet(ACTIVE_TIMEOUT_SECONDS + 5.0, flags="A", length=1200, **s2c))
+    )
+    emitted.extend(tracker.flush())
+
+    assert emitted[0]["end_reason"] == "active_timeout"
+    new_slice = emitted[1]
+    assert new_slice["source_ip"] == CLIENT
+    assert new_slice["source_port"] == 52104
+    assert new_slice["features"]["spkts"] == 0
+    assert new_slice["features"]["dpkts"] == 1
+    assert new_slice["features"]["dbytes"] == 1200
+    assert new_slice["features"]["sttl"] == 0
+    assert new_slice["features"]["dttl"] == 254
+
+
+def test_completed_connections_do_not_accumulate_drain_state():
+    tracker = FlowTracker()
+    for index in range(100):
+        base = 1000.0 + index * 5.0
+        sport = 52200 + index
+        c2s = {"src": CLIENT, "dst": SERVER, "sport": sport, "dport": 80, "ttl": 62}
+        s2c = {"src": SERVER, "dst": CLIENT, "sport": 80, "dport": sport, "ttl": 254}
+        tracker.add_packet(tcp_packet(base + 0.00, flags="S", **c2s))
+        tracker.add_packet(tcp_packet(base + 0.01, flags="SA", **s2c))
+        tcp_teardown = [
+            tcp_packet(base + 0.02, flags="FA", **c2s),
+            tcp_packet(base + 0.03, flags="FA", **s2c),
+            tcp_packet(base + 0.04, flags="A", **c2s),
+        ]
+        for packet in tcp_teardown:
+            tracker.add_packet(packet)
+
+    assert tracker.active_flows == 0
+    # Idle sweeps clear expired drain markers; at most the newest may remain.
+    assert len(tracker._draining) <= 1
+    tracker.flush()
+    assert len(tracker._draining) == 0
 
 
 def test_direction_is_assigned_by_first_packet():
@@ -175,8 +244,21 @@ def test_features_are_the_fifteen_deployed_columns():
     tracker.add_packet(udp_packet(1.0, CLIENT, SERVER, 40000, 53))
     flow = tracker.flush()[0]
     assert set(flow["features"]) == {
-        "dur", "proto", "service", "state", "spkts", "dpkts", "sbytes",
-        "dbytes", "rate", "sttl", "dttl", "sload", "dload", "sinpkt", "dinpkt",
+        "dur",
+        "proto",
+        "service",
+        "state",
+        "spkts",
+        "dpkts",
+        "sbytes",
+        "dbytes",
+        "rate",
+        "sttl",
+        "dttl",
+        "sload",
+        "dload",
+        "sinpkt",
+        "dinpkt",
     }
 
 

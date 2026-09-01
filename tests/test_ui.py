@@ -64,3 +64,11 @@ def test_runtime_defaults_are_safe_for_local_use():
     assert not re.search(r'host="0\.0\.0\.0"', main), (
         "0.0.0.0 must be opt-in via ALGOGUARD_HOST, not hardcoded"
     )
+
+
+def test_session_secret_has_no_known_fallback():
+    with open("app.py") as handle:
+        source = handle.read()
+
+    assert "algoguard-dev-secret" not in source
+    assert "secrets.token_hex" in source

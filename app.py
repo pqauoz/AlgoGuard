@@ -1,4 +1,5 @@
 import os
+import secrets
 import sqlite3
 from urllib.parse import urlsplit
 
@@ -44,7 +45,9 @@ ADMIN_ROLES = ("Administrator", "Analyst")
 
 
 app = Flask(__name__)
-app.config["SECRET_KEY"] = os.environ.get("ALGOGUARD_SECRET_KEY", "algoguard-dev-secret")
+_configured_secret = os.environ.get("ALGOGUARD_SECRET_KEY")
+app.config["SECRET_KEY"] = _configured_secret or secrets.token_hex(32)
+app.config["SECRET_KEY_EPHEMERAL"] = _configured_secret is None
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = os.environ.get("ALGOGUARD_SECURE_COOKIES", "0") == "1"

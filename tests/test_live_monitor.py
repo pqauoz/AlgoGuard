@@ -1,3 +1,4 @@
+import threading
 import time
 
 import pytest
@@ -135,6 +136,34 @@ def test_second_session_is_refused_while_one_runs(fast_monitor, replay_dataset):
         start()
 
 
+def test_stopping_worker_blocks_a_replacement_session():
+    class StubbornThread:
+        def __init__(self):
+            self.alive = True
+            self.joined = False
+
+        def is_alive(self):
+            return self.alive
+
+        def join(self, timeout=None):
+            self.joined = True
+
+    thread = StubbornThread()
+    monitor._SESSION = monitor._new_session("csv", None, DATASET, "fast", "sequential", "none", 1)
+    monitor._THREAD = thread
+    monitor._STOP_EVENT = threading.Event()
+    monitor._PAUSE_EVENT = threading.Event()
+
+    stopped = monitor.stop_session()
+
+    assert thread.joined is True
+    assert stopped["state"] == "stopping"
+    with pytest.raises(monitor.LiveMonitorError, match="already running"):
+        start()
+
+    thread.alive = False
+
+
 def test_session_only_mode_stores_nothing(fast_monitor, replay_dataset):
     before = len(db.list_alerts(limit=1000))
     start(persist="none")
@@ -233,6 +262,8 @@ def test_monitor_page_renders_controls(authenticated_client, fast_monitor):
     assert 'id="monitorStart"' in html
     assert 'id="monitorChart"' in html
     assert "/monitor/status" in html
+    assert 'const ACTIVE_STATES = ["starting", "running", "paused", "stopping"]' in html
+    assert "startButton.disabled = monitorIsActive ||" in html
     for dataset in monitor.DATASET_CHOICES:
         assert dataset in html
 

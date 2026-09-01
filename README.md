@@ -161,7 +161,16 @@ $env:ALGOGUARD_SECRET_KEY = "a-long-random-secret"
 python app.py
 ```
 
-Multiple accounts are supported. Administrators can create Administrator or Analyst accounts from the Admins page. Password hashes and accounts persist in SQLite. Login state uses a signed Flask browser session and ends when the session cookie is cleared or the user logs out; it is not a permanent login token.
+When `ALGOGUARD_SECRET_KEY` is omitted, the local single-process server generates
+an unpredictable temporary key. That is safer than a shared development secret,
+but it signs sessions only until the process restarts. Set a persistent random
+key before exposing the app or running more than one server process.
+
+Multiple accounts are supported. Administrators can create Administrator or
+Analyst accounts from the Admins page. Password hashes and accounts persist in
+SQLite. Login state uses a signed Flask browser session and ends when the session
+cookie is cleared, the user logs out, or an ephemeral signing key changes after
+restart; it is not a permanent login token.
 
 ## CSV Contract
 

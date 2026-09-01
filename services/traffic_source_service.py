@@ -33,6 +33,10 @@ class TrafficSourceError(RuntimeError):
     """Raised when a traffic source cannot be prepared or read."""
 
 
+class TrafficSourceCancelled(TrafficSourceError):
+    """Raised when source preparation is cancelled by the monitor."""
+
+
 def _ensure_scapy_layers():
     """Load Scapy's core dissectors so captured frames decode to Ether/IP.
 
@@ -148,9 +152,17 @@ class CsvReplaySource(TrafficSource):
 class PcapReplaySource(TrafficSource):
     """Aggregate a recorded packet capture into flows, then replay the flows."""
 
-    def __init__(self, path, order="sequential", idle_timeout=None, active_timeout=None):
+    def __init__(
+        self,
+        path,
+        order="sequential",
+        idle_timeout=None,
+        active_timeout=None,
+        cancel_event=None,
+    ):
         self._path = path
         self._order = order
+        self._cancel_event = cancel_event
         self._flows = []
         self._index = 0
         self._tracker_kwargs = {}
@@ -161,6 +173,9 @@ class PcapReplaySource(TrafficSource):
         self.packets_read = 0
 
     def prepare(self):
+        if self._cancel_event is not None and self._cancel_event.is_set():
+            raise TrafficSourceCancelled("Packet capture preparation was cancelled.")
+
         try:
             from scapy.utils import PcapReader
 
@@ -176,6 +191,8 @@ class PcapReplaySource(TrafficSource):
         try:
             with PcapReader(self._path) as reader:
                 for packet in reader:
+                    if self._cancel_event is not None and self._cancel_event.is_set():
+                        raise TrafficSourceCancelled("Packet capture preparation was cancelled.")
                     info = packet_info_from_scapy(packet)
                     if info is None:
                         continue
@@ -185,12 +202,12 @@ class PcapReplaySource(TrafficSource):
             raise
         except Exception as error:
             raise TrafficSourceError(f"Unable to read the packet capture: {error}") from error
+        if self._cancel_event is not None and self._cancel_event.is_set():
+            raise TrafficSourceCancelled("Packet capture preparation was cancelled.")
         flows.extend(tracker.flush())
 
         if not flows:
-            raise TrafficSourceError(
-                "The packet capture contains no classifiable IP flows."
-            )
+            raise TrafficSourceError("The packet capture contains no classifiable IP flows.")
         if self._order == "random":
             random.shuffle(flows)
         else:
@@ -337,9 +354,7 @@ class LiveCaptureSource(TrafficSource):
             now = time.time()
             if now - self._last_idle_check >= 1.0:
                 self._last_idle_check = now
-                self._pending.extend(
-                    _flow_event(flow) for flow in self._tracker.expire_idle(now)
-                )
+                self._pending.extend(_flow_event(flow) for flow in self._tracker.expire_idle(now))
             return None
 
         info = packet_info_from_scapy(packet)
@@ -352,9 +367,7 @@ class LiveCaptureSource(TrafficSource):
         if info is not None:
             with self._lock:
                 self.packets_captured += 1
-            self._pending.extend(
-                _flow_event(flow) for flow in self._tracker.add_packet(info)
-            )
+            self._pending.extend(_flow_event(flow) for flow in self._tracker.add_packet(info))
         return self.next_event(timeout=0) if self._pending else None
 
     def close(self):
@@ -380,6 +393,7 @@ def live_capture_available():
     """Report whether live packet capture can run here, and why not if not."""
     try:
         from scapy.arch import get_if_list
+        from scapy.config import conf
     except ImportError:
         return False, (
             "Live capture requires the scapy package. Install project "
@@ -389,6 +403,12 @@ def live_capture_available():
         return False, (
             "Live capture needs a packet capture driver. On Windows, install "
             f"Npcap from npcap.com and restart AlgoGuard. Details: {error}"
+        )
+
+    if os.name == "nt" and not conf.use_pcap:
+        return False, (
+            "Live capture needs the Npcap packet capture driver on Windows. "
+            "Install Npcap from npcap.com, then restart AlgoGuard."
         )
 
     try:
