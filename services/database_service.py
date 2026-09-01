@@ -1,5 +1,6 @@
 import json
 import os
+import secrets
 import sqlite3
 from datetime import datetime, timezone
 
@@ -414,20 +415,33 @@ def migration_status():
 
 
 def seed_default_admin():
-    """Create the local demo admin account when no admin exists yet."""
+    """Create the first local admin without a predictable fallback password."""
     username = os.environ.get("ALGOGUARD_ADMIN_USERNAME", "admin")
-    password = os.environ.get("ALGOGUARD_ADMIN_PASSWORD", "admin123")
     email = os.environ.get("ALGOGUARD_ADMIN_EMAIL", "admin@algoguard.local")
 
     with get_connection() as connection:
         if connection.execute("SELECT COUNT(*) FROM admin").fetchone()[0]:
             return
+
+        password = os.environ.get("ALGOGUARD_ADMIN_PASSWORD")
+        generated_password = password is None
+        if generated_password:
+            password = secrets.token_urlsafe(18)
         connection.execute(
             """
             INSERT INTO admin (username, password_hash, email, role, created_at)
             VALUES (?, ?, ?, ?, ?)
             """,
             (username, generate_password_hash(password), email, "Administrator", utc_now()),
+        )
+
+    if generated_password:
+        print(
+            "\nAlgoGuard created the first local administrator.\n"
+            f"Username: {username}\n"
+            f"Password: {password}\n"
+            "Store this password now; it will not be shown again.\n",
+            flush=True,
         )
 
 
@@ -834,6 +848,11 @@ def get_active_deployment():
 
 def insert_network_traffic_from_flow(flow_data, dataset_source="simulation"):
     """Store one manual traffic record while retaining its full feature payload."""
+    with get_connection() as connection:
+        return _insert_network_traffic_from_flow(connection, flow_data, dataset_source)
+
+
+def _insert_network_traffic_from_flow(connection, flow_data, dataset_source):
     source_bytes = _safe_float(flow_data.get("sbytes"), 0) or 0
     destination_bytes = _safe_float(flow_data.get("dbytes"), 0) or 0
     packet_size = _safe_int(
@@ -841,30 +860,29 @@ def insert_network_traffic_from_flow(flow_data, dataset_source="simulation"):
         int(source_bytes + destination_bytes),
     )
 
-    with get_connection() as connection:
-        cursor = connection.execute(
-            """
-            INSERT INTO network_traffic (
-                timestamp, source_ip, destination_ip, source_port,
-                destination_port, protocol, packet_size, flags,
-                dataset_source, feature_payload
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                str(flow_data.get("timestamp") or utc_now()),
-                str(flow_data.get("source_ip") or "manual"),
-                str(flow_data.get("destination_ip") or "manual"),
-                _safe_int(flow_data.get("source_port"), 0),
-                _safe_int(flow_data.get("destination_port"), 0),
-                str(flow_data.get("protocol") or flow_data.get("proto") or ""),
-                packet_size,
-                str(flow_data.get("flags") or flow_data.get("state") or ""),
-                dataset_source,
-                json.dumps(flow_data, default=str),
-            ),
+    cursor = connection.execute(
+        """
+        INSERT INTO network_traffic (
+            timestamp, source_ip, destination_ip, source_port,
+            destination_port, protocol, packet_size, flags,
+            dataset_source, feature_payload
         )
-        return cursor.lastrowid
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            str(flow_data.get("timestamp") or utc_now()),
+            str(flow_data.get("source_ip") or "manual"),
+            str(flow_data.get("destination_ip") or "manual"),
+            _safe_int(flow_data.get("source_port"), 0),
+            _safe_int(flow_data.get("destination_port"), 0),
+            str(flow_data.get("protocol") or flow_data.get("proto") or ""),
+            packet_size,
+            str(flow_data.get("flags") or flow_data.get("state") or ""),
+            dataset_source,
+            json.dumps(flow_data, default=str),
+        ),
+    )
+    return cursor.lastrowid
 
 
 def insert_capture_session(admin_id, interface, bpf_filter):
@@ -924,29 +942,55 @@ def insert_prediction(
 ):
     """Store a single-record prediction without dataset-level metrics."""
     with get_connection() as connection:
-        cursor = connection.execute(
-            """
-            INSERT INTO prediction (
-                traffic_id, model_id, deployment_id, model_name,
-                predicted_label, confidence_score, prediction_timestamp,
-                latency_ms, alert_created, input_payload
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                traffic_id,
-                model_id,
-                deployment_id,
-                model_name,
-                str(predicted_label),
-                _safe_float(confidence_score),
-                utc_now(),
-                _safe_float(latency_ms),
-                int(bool(alert_created)),
-                json.dumps(input_payload or {}, default=str),
-            ),
+        return _insert_prediction(
+            connection,
+            traffic_id,
+            model_id,
+            predicted_label,
+            confidence_score,
+            deployment_id,
+            model_name,
+            latency_ms,
+            input_payload,
+            alert_created,
         )
-        return cursor.lastrowid
+
+
+def _insert_prediction(
+    connection,
+    traffic_id,
+    model_id,
+    predicted_label,
+    confidence_score=None,
+    deployment_id=None,
+    model_name=None,
+    latency_ms=None,
+    input_payload=None,
+    alert_created=False,
+):
+    cursor = connection.execute(
+        """
+        INSERT INTO prediction (
+            traffic_id, model_id, deployment_id, model_name,
+            predicted_label, confidence_score, prediction_timestamp,
+            latency_ms, alert_created, input_payload
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            traffic_id,
+            model_id,
+            deployment_id,
+            model_name,
+            str(predicted_label),
+            _safe_float(confidence_score),
+            utc_now(),
+            _safe_float(latency_ms),
+            int(bool(alert_created)),
+            json.dumps(input_payload or {}, default=str),
+        ),
+    )
+    return cursor.lastrowid
 
 
 def mark_prediction_alert_created(prediction_id):
@@ -960,16 +1004,69 @@ def mark_prediction_alert_created(prediction_id):
 def insert_alert(prediction_id, severity_level, description, alert_status="Open"):
     """Store an attack alert linked to one prediction."""
     with get_connection() as connection:
-        cursor = connection.execute(
-            """
-            INSERT INTO alert (
-                prediction_id, severity_level, alert_status, detected_at, description
-            )
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (prediction_id, severity_level, alert_status, utc_now(), description),
+        return _insert_alert(
+            connection,
+            prediction_id,
+            severity_level,
+            description,
+            alert_status,
         )
-        return cursor.lastrowid
+
+
+def _insert_alert(connection, prediction_id, severity_level, description, alert_status="Open"):
+    cursor = connection.execute(
+        """
+        INSERT INTO alert (
+            prediction_id, severity_level, alert_status, detected_at, description
+        )
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (prediction_id, severity_level, alert_status, utc_now(), description),
+    )
+    return cursor.lastrowid
+
+
+def store_classified_flow(
+    flow_data,
+    dataset_source,
+    model_id,
+    predicted_label,
+    confidence_score=None,
+    deployment_id=None,
+    model_name=None,
+    latency_ms=None,
+    create_alert=False,
+    alert_severity="High",
+    alert_description=None,
+):
+    """Atomically store a classified flow, its prediction, and optional alert."""
+    with get_connection() as connection:
+        traffic_id = _insert_network_traffic_from_flow(
+            connection,
+            flow_data,
+            dataset_source,
+        )
+        prediction_id = _insert_prediction(
+            connection,
+            traffic_id,
+            model_id,
+            predicted_label,
+            confidence_score,
+            deployment_id,
+            model_name,
+            latency_ms,
+            flow_data,
+            alert_created=create_alert,
+        )
+        alert_id = None
+        if create_alert:
+            alert_id = _insert_alert(
+                connection,
+                prediction_id,
+                alert_severity,
+                alert_description or f"{predicted_label} traffic detected.",
+            )
+        return traffic_id, prediction_id, alert_id
 
 
 def list_alerts(limit=100):

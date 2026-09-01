@@ -28,12 +28,9 @@ import pandas as pd
 
 from services.database_service import (
     finalize_capture_session,
-    insert_alert,
     insert_capture_session,
-    insert_network_traffic_from_flow,
-    insert_prediction,
     log_system_event,
-    mark_prediction_alert_created,
+    store_classified_flow,
     utc_now,
 )
 from services.deployment_service import DeploymentError, load_active_artifact
@@ -256,26 +253,21 @@ def _store_flow(deployment, flow_data, result, source_tag):
     keeping the database writes outside the lock means a slow write can never
     stall the page's status polling.
     """
-    traffic_id = insert_network_traffic_from_flow(flow_data, source_tag)
-    prediction_id = insert_prediction(
-        traffic_id,
+    is_attack = result["prediction"] == "Attack"
+    _, prediction_id, alert_id = store_classified_flow(
+        flow_data,
+        source_tag,
         deployment.get("model_id"),
         result["prediction"],
         result["confidence"],
         deployment_id=deployment.get("deployment_id"),
         model_name=deployment.get("model_name"),
         latency_ms=result["latency_ms"],
-        input_payload=flow_data,
+        create_alert=is_attack,
+        alert_description=(
+            f"Attack detected by {deployment.get('model_name')} during live monitoring."
+        ),
     )
-
-    alert_id = None
-    if result["prediction"] == "Attack":
-        alert_id = insert_alert(
-            prediction_id,
-            "High",
-            f"Attack detected by {deployment.get('model_name')} during live monitoring.",
-        )
-        mark_prediction_alert_created(prediction_id)
     return prediction_id, alert_id
 
 
@@ -398,7 +390,11 @@ def _worker(session, stop_event, pause_event):
             + (
                 f"({source.row_total:,} flows, {session['speed']} speed)."
                 if source.row_total
-                else "(real-time capture)."
+                else (
+                    "(real-time capture)."
+                    if source_type == "live"
+                    else f"(streaming recorded capture, {session['speed']} speed)."
+                )
             )
         ),
         run_id=deployment_summary["run_id"],
@@ -422,6 +418,9 @@ def _worker(session, stop_event, pause_event):
 
             try:
                 event_data = source.next_event(timeout=0.2)
+            except TrafficSourceCancelled:
+                final_state = "stopped"
+                break
             except StopIteration:
                 break
             if event_data is None:
@@ -568,6 +567,8 @@ def _worker(session, stop_event, pause_event):
     source.close()
     with _LOCK:
         session["state"] = final_state
+        if source_type == "pcap" and final_state == "completed":
+            session["row_total"] = session["totals"]["flows"]
         if source_type == "live":
             session["capture"] = source.stats()
         totals = dict(session["totals"])

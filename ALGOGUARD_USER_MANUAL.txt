@@ -106,18 +106,20 @@ Then open:
 
 http://localhost:5000
 
-Default local login:
+First local login on a new database:
 
 Username:
 admin
 
 Password:
-admin123
+Read the one-time random password printed in the startup terminal.
 
 Important:
 The default admin is created only when the local SQLite database is first
-created. For a real deployment, change the admin username/password using
-environment variables before the first run.
+created. Store the generated password immediately because it is not shown again.
+You can choose the first admin username/password using ALGOGUARD_ADMIN_USERNAME
+and ALGOGUARD_ADMIN_PASSWORD environment variables before the first run. These
+settings do not change an account already stored in the database.
 
 After logging in with an Administrator account, open the Admins page to create
 more admin accounts. Each new admin is stored in SQLite with a hashed password.

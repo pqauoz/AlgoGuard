@@ -1,10 +1,11 @@
+import hmac
 import os
 import secrets
 import sqlite3
 from urllib.parse import urlsplit
 
-from flask import Flask, flash, jsonify, redirect, render_template, request, session, url_for
-from werkzeug.security import check_password_hash
+from flask import Flask, flash, g, jsonify, redirect, render_template, request, session, url_for
+from werkzeug.security import check_password_hash, generate_password_hash
 
 from services.database_service import (
     DATABASE_FOLDER,
@@ -15,14 +16,11 @@ from services.database_service import (
     get_latest_prediction,
     get_log_filter_options,
     initialize_database,
-    insert_alert,
-    insert_network_traffic_from_flow,
-    insert_prediction,
     list_admins,
     list_alerts,
     list_system_logs,
     log_system_event,
-    mark_prediction_alert_created,
+    store_classified_flow,
 )
 from services.live_monitor_service import (
     LiveMonitorError,
@@ -52,6 +50,9 @@ app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = os.environ.get("ALGOGUARD_SECURE_COOKIES", "0") == "1"
 app.config["SAVED_MODEL_FOLDER"] = SAVED_MODEL_FOLDER
+app.config["MAX_CONTENT_LENGTH"] = 1024 * 1024
+
+_DUMMY_PASSWORD_HASH = generate_password_hash(secrets.token_urlsafe(32))
 
 
 def ensure_runtime_folders():
@@ -72,9 +73,36 @@ def _safe_next_url(next_url):
     if not next_url:
         return url_for("dashboard")
     parsed = urlsplit(next_url)
-    if parsed.netloc or not next_url.startswith("/"):
+    if (
+        parsed.scheme
+        or parsed.netloc
+        or not next_url.startswith("/")
+        or next_url.startswith("//")
+        or "\\" in next_url
+        or any(character in next_url for character in ("\r", "\n"))
+    ):
         return url_for("dashboard")
     return next_url
+
+
+def csrf_token():
+    token = session.get("_csrf_token")
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session["_csrf_token"] = token
+    return token
+
+
+app.jinja_env.globals["csrf_token"] = csrf_token
+
+
+def csp_nonce():
+    if not hasattr(g, "csp_nonce"):
+        g.csp_nonce = secrets.token_urlsafe(18)
+    return g.csp_nonce
+
+
+app.jinja_env.globals["csp_nonce"] = csp_nonce
 
 
 def _log(
@@ -115,26 +143,21 @@ def _execute_prediction(payload, log_module):
 
     try:
         result = run_simulation(payload)
-        traffic_id = insert_network_traffic_from_flow(result["flow_data"], "simulation")
-        prediction_id = insert_prediction(
-            traffic_id,
+        is_attack = result["prediction"] == "Attack"
+        _, prediction_id, alert_id = store_classified_flow(
+            result["flow_data"],
+            "simulation",
             result["model_id"],
             result["prediction"],
             result["confidence"],
             deployment_id=result["deployment_id"],
             model_name=result["deployed_model_name"],
             latency_ms=result["latency_ms"],
-            input_payload=result["flow_data"],
+            create_alert=is_attack,
+            alert_description=f"Attack predicted by {result['deployed_model_name']}.",
         )
 
-        alert_id = None
-        if result["prediction"] == "Attack":
-            alert_id = insert_alert(
-                prediction_id,
-                "High",
-                f"Attack predicted by {result['deployed_model_name']}.",
-            )
-            mark_prediction_alert_created(prediction_id)
+        if is_attack:
             _log(
                 log_module,
                 "attack_predicted",
@@ -213,6 +236,21 @@ def require_admin_login():
     )
 
 
+@app.before_request
+def verify_csrf_token():
+    if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
+        return None
+
+    expected = session.get("_csrf_token")
+    provided = request.form.get("_csrf_token") or request.headers.get("X-CSRF-Token")
+    if expected and provided and hmac.compare_digest(str(expected), str(provided)):
+        return None
+
+    if request.endpoint in JSON_ENDPOINTS:
+        return jsonify({"status": "error", "message": "Invalid or expired request token."}), 400
+    return "Invalid or expired request token.", 400
+
+
 @app.after_request
 def prevent_dynamic_page_caching(response):
     """Keep authenticated views out of browser history and intermediary caches."""
@@ -222,6 +260,18 @@ def prevent_dynamic_page_caching(response):
         )
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        f"script-src 'self' 'nonce-{csp_nonce()}' https://cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "font-src 'self' https://cdn.jsdelivr.net data:; "
+        "img-src 'self' data:; connect-src 'self'; object-src 'none'; "
+        "base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
+    )
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Permissions-Policy"] = "camera=(), geolocation=(), microphone=()"
     return response
 
 
@@ -256,8 +306,11 @@ def login():
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
         admin = get_admin_by_username(username)
-        if admin and check_password_hash(admin["password_hash"], password):
+        password_hash = admin["password_hash"] if admin else _DUMMY_PASSWORD_HASH
+        password_valid = check_password_hash(password_hash, password)
+        if admin and password_valid:
             session.clear()
+            csrf_token()
             session["admin_id"] = admin["admin_id"]
             session["admin_username"] = admin["username"]
             session["admin_role"] = admin["role"]
@@ -282,7 +335,7 @@ def login():
     return render_template("login.html", next_url=next_url, username=username)
 
 
-@app.route("/logout")
+@app.route("/logout", methods=["POST"])
 def logout():
     if current_admin_id():
         _log(
@@ -438,8 +491,8 @@ def predict_api():
         return jsonify({"status": "success", **result})
     except SimulationServiceError as error:
         return jsonify({"status": "error", "message": str(error)}), 400
-    except Exception as error:
-        return jsonify({"status": "error", "message": str(error)}), 500
+    except Exception:
+        return jsonify({"status": "error", "message": "Prediction failed safely."}), 500
 
 
 @app.route("/alerts")

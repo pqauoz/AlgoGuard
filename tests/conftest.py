@@ -11,6 +11,7 @@ TEST_RUNTIME = Path(tempfile.mkdtemp(prefix="algoguard-tests-"))
 os.environ["ALGOGUARD_DATABASE_PATH"] = str(TEST_RUNTIME / "test.sqlite3")
 os.environ["ALGOGUARD_DEPLOYED_MODEL_PATH"] = str(TEST_RUNTIME / "models" / "deployed_model.joblib")
 os.environ["ALGOGUARD_SECRET_KEY"] = "test-secret"
+os.environ["ALGOGUARD_ADMIN_PASSWORD"] = "admin123"
 
 
 @pytest.fixture(scope="session")
@@ -42,11 +43,29 @@ def client(app_module):
 
 @pytest.fixture()
 def authenticated_client(client):
+    client.get("/login")
+    with client.session_transaction() as test_session:
+        login_token = test_session["_csrf_token"]
     response = client.post(
         "/login",
-        data={"username": "admin", "password": "admin123"},
+        data={
+            "username": "admin",
+            "password": "admin123",
+            "_csrf_token": login_token,
+        },
     )
     assert response.status_code == 302
+
+    original_post = client.post
+
+    def csrf_post(*args, **kwargs):
+        with client.session_transaction() as test_session:
+            token = test_session.get("_csrf_token", "")
+        headers = dict(kwargs.pop("headers", {}) or {})
+        headers.setdefault("X-CSRF-Token", token)
+        return original_post(*args, headers=headers, **kwargs)
+
+    client.post = csrf_post
     return client
 
 

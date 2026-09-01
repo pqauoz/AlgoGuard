@@ -191,7 +191,7 @@
 
 {% block scripts %}
 {% if available %}
-<script>
+<script nonce="{{ csp_nonce() }}">
 (function () {
     const POLL_INTERVAL_MS = 700;
     const MAX_FEED_ROWS = 50;
@@ -265,9 +265,9 @@
         startButton.disabled = isActive;
         pauseButton.disabled = state !== "running" && state !== "paused";
         stopButton.disabled = !isActive || state === "stopping";
-        pauseButton.innerHTML = state === "paused"
-            ? '<i class="bi bi-play-fill"></i> Resume'
-            : '<i class="bi bi-pause-fill"></i> Pause';
+        const pauseIcon = document.createElement("i");
+        pauseIcon.className = state === "paused" ? "bi bi-play-fill" : "bi bi-pause-fill";
+        pauseButton.replaceChildren(pauseIcon, state === "paused" ? " Resume" : " Pause");
         Object.keys(controls).forEach(function (key) {
             controls[key].disabled = isActive;
         });
@@ -290,6 +290,8 @@
                 formatNumber(totals.flows) + " of " + formatNumber(session.row_total) + " flows";
         } else if (session.source_type === "live" && isActive) {
             document.getElementById("statProgress").textContent = "Real-time capture";
+        } else if (session.source_type === "pcap" && isActive) {
+            document.getElementById("statProgress").textContent = "Streaming recorded capture";
         } else {
             document.getElementById("statProgress").textContent = "Waiting to start";
         }
@@ -329,30 +331,52 @@
             emptyRow.remove();
         }
         events.forEach(function (event) {
-            if (event.prediction === "Attack") {
+            const verdict = event.prediction === "Attack" ? "Attack" : "Normal";
+            if (verdict === "Attack") {
                 pendingBucket.attack += 1;
             } else {
                 pendingBucket.normal += 1;
             }
             const row = document.createElement("tr");
-            row.className = event.prediction === "Attack" ? "feed-attack" : "feed-normal";
-            const actual = event.actual === null || event.actual === undefined
-                ? "&mdash;"
-                : (event.match
-                    ? '<span class="feed-match">' + event.actual + "</span>"
-                    : '<span class="feed-mismatch">' + event.actual + "</span>");
-            const sourceLabel = event.source_ip
+            row.className = verdict === "Attack" ? "feed-attack" : "feed-normal";
+            const sourceLabel = String(event.source_ip || "-")
                 + (event.source_port ? ":" + event.source_port : "");
-            const destinationLabel = event.destination_ip
+            const destinationLabel = String(event.destination_ip || "-")
                 + (event.destination_port ? ":" + event.destination_port : "");
-            row.innerHTML =
-                "<td>" + (event.timestamp || "") + "</td>" +
-                "<td class=\"feed-endpoints\">" + sourceLabel + " &rarr; " + destinationLabel + "</td>" +
-                "<td>" + (event.proto || "-") + "</td>" +
-                "<td>" + (event.service || "-") + "</td>" +
-                '<td><span class="verdict-badge verdict-' + event.prediction.toLowerCase() + '">' + event.prediction + "</span></td>" +
-                "<td>" + Number(event.confidence).toFixed(2) + "%</td>" +
-                "<td>" + actual + "</td>";
+
+            function appendTextCell(value, className) {
+                const cell = document.createElement("td");
+                if (className) { cell.className = className; }
+                cell.textContent = String(value);
+                row.appendChild(cell);
+                return cell;
+            }
+
+            appendTextCell(event.timestamp || "");
+            appendTextCell(sourceLabel + " → " + destinationLabel, "feed-endpoints");
+            appendTextCell(event.proto || "-");
+            appendTextCell(event.service || "-");
+
+            const verdictCell = document.createElement("td");
+            const verdictBadge = document.createElement("span");
+            verdictBadge.className = "verdict-badge verdict-" + verdict.toLowerCase();
+            verdictBadge.textContent = verdict;
+            verdictCell.appendChild(verdictBadge);
+            row.appendChild(verdictCell);
+
+            const confidence = Number(event.confidence);
+            appendTextCell((Number.isFinite(confidence) ? confidence.toFixed(2) : "0.00") + "%");
+
+            const actualCell = document.createElement("td");
+            if (event.actual === null || event.actual === undefined) {
+                actualCell.textContent = "—";
+            } else {
+                const actualBadge = document.createElement("span");
+                actualBadge.className = event.match ? "feed-match" : "feed-mismatch";
+                actualBadge.textContent = String(event.actual);
+                actualCell.appendChild(actualBadge);
+            }
+            row.appendChild(actualCell);
             feedBody.insertBefore(row, feedBody.firstChild);
         });
         while (feedBody.children.length > MAX_FEED_ROWS) {
@@ -462,7 +486,10 @@
         return fetch(url, {
             method: "POST",
             credentials: "same-origin",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+                "Content-Type": "application/json",
+                "X-CSRF-Token": {{ csrf_token()|tojson }},
+            },
             body: JSON.stringify(body || {}),
         })
             .then(function (response) {
@@ -488,7 +515,13 @@
         lastSeq = 0;
         buckets = [];
         pendingBucket = { normal: 0, attack: 0 };
-        feedBody.innerHTML = '<tr class="feed-empty-row"><td colspan="7">Starting the traffic stream&hellip;</td></tr>';
+        const startingRow = document.createElement("tr");
+        startingRow.className = "feed-empty-row";
+        const startingCell = document.createElement("td");
+        startingCell.colSpan = 7;
+        startingCell.textContent = "Starting the traffic stream…";
+        startingRow.appendChild(startingCell);
+        feedBody.replaceChildren(startingRow);
         drawChart();
         control("{{ url_for('monitor_start') }}", {
             source_type: controls.source.value,

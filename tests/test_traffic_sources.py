@@ -76,13 +76,15 @@ def test_pcap_source_aggregates_packets_into_flows(tmp_path):
     source = PcapReplaySource(str(pcap_path))
     source.prepare()
 
-    assert source.row_total == 4  # three HTTP sessions plus one DNS exchange
+    assert source.row_total is None  # sequential replay does not pre-buffer the full capture
     events = []
     while True:
         try:
             events.append(source.next_event())
         except StopIteration:
             break
+
+    assert source.row_total == 4  # three HTTP sessions plus one DNS exchange
 
     http_events = [event for event in events if event["record"]["service"] == "http"]
     dns_events = [event for event in events if event["record"]["service"] == "dns"]
@@ -116,6 +118,18 @@ def test_pcap_source_honors_cancellation_before_preparation(tmp_path):
     source = PcapReplaySource(str(pcap_path), cancel_event=cancel_event)
     with pytest.raises(TrafficSourceCancelled, match="cancelled"):
         source.prepare()
+
+
+def test_sequential_pcap_replay_does_not_buffer_the_full_capture(tmp_path):
+    pcap_path = write_sample_pcap(tmp_path / "large.pcap", sessions=50)
+
+    source = PcapReplaySource(str(pcap_path), order="sequential")
+    source.prepare()
+
+    assert source.row_total is None
+    assert source.packets_read < 50
+    assert source._flows == []
+    source.close()
 
 
 def test_csv_source_replays_rows_with_labels(tmp_path, trained_bundle):

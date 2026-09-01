@@ -20,6 +20,7 @@
     </div>
 
     <form class="login-panel" method="post" autocomplete="off">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="next" value="{{ next_url }}">
         <div class="panel-heading">
             <div>

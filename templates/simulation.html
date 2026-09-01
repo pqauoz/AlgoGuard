@@ -26,6 +26,7 @@
 {% else %}
 <section class="simulation-layout">
     <form class="panel simulation-form" method="post">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <div class="panel-heading">
             <div>
                 <p class="eyebrow">Flow Input</p>

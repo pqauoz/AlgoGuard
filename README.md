@@ -144,14 +144,10 @@ $env:ALGOGUARD_HOST = "0.0.0.0" # reachable from other machines - only on a netw
 $env:ALGOGUARD_PORT = "5000"    # also the port excluded from live capture
 ```
 
-Default local account on a new database:
-
-```text
-Username: admin
-Password: admin123
-```
-
-Change these environment values before first startup in a new environment:
+On a new database, AlgoGuard creates the `admin` account with a random password
+and prints it once in the startup terminal. Store it immediately. To choose the
+first account credentials yourself, set these environment values before first
+startup:
 
 ```powershell
 $env:ALGOGUARD_ADMIN_USERNAME = "your_admin"
@@ -168,7 +164,8 @@ key before exposing the app or running more than one server process.
 
 Multiple accounts are supported. Administrators can create Administrator or
 Analyst accounts from the Admins page. Password hashes and accounts persist in
-SQLite. Login state uses a signed Flask browser session and ends when the session
+SQLite. These first-run settings do not replace an account already stored in the
+database. Login state uses a signed Flask browser session and ends when the session
 cookie is cleared, the user logs out, or an ephemeral signing key changes after
 restart; it is not a permanent login token.
 

@@ -3,6 +3,7 @@ import sqlite3
 
 import joblib
 import pytest
+from werkzeug.security import check_password_hash
 
 from services import database_service as db
 from services.deployment_service import (
@@ -21,6 +22,22 @@ def test_database_context_manager_closes_connection():
 
     with pytest.raises(sqlite3.ProgrammingError, match="closed"):
         connection.execute("SELECT 1")
+
+
+def test_first_admin_gets_random_one_time_password(monkeypatch, tmp_path, capsys):
+    database_path = tmp_path / "fresh.sqlite3"
+    monkeypatch.setattr(db, "DATABASE_PATH", str(database_path))
+    monkeypatch.delenv("ALGOGUARD_ADMIN_PASSWORD", raising=False)
+
+    db.initialize_database()
+
+    output = capsys.readouterr().out
+    password_line = next(line for line in output.splitlines() if line.startswith("Password: "))
+    generated_password = password_line.removeprefix("Password: ")
+    admin = db.get_admin_by_username("admin")
+    assert generated_password != "admin123"
+    assert len(generated_password) >= 20
+    assert check_password_hash(admin["password_hash"], generated_password)
 
 
 def synthetic_results():
@@ -261,6 +278,39 @@ def test_normal_prediction_does_not_create_alert(authenticated_client, trained_b
     assert payload["prediction"] == "Normal"
     assert payload["alert_created"] is False
     assert len(db.list_alerts(limit=1000)) == before_alerts
+
+
+def test_classified_flow_transaction_rolls_back_if_alert_write_fails(
+    monkeypatch,
+    trained_bundle,
+):
+    model_id = model_id_for(trained_bundle["run_id"], "Stacking Ensemble")
+    with db.get_connection() as connection:
+        before = {
+            table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            for table in ("network_traffic", "prediction", "alert")
+        }
+
+    def fail_alert_write(*args, **kwargs):
+        raise sqlite3.DatabaseError("simulated alert failure")
+
+    monkeypatch.setattr(db, "_insert_alert", fail_alert_write)
+    with pytest.raises(sqlite3.DatabaseError, match="simulated alert failure"):
+        db.store_classified_flow(
+            {"source_ip": "192.0.2.1", "destination_ip": "198.51.100.2"},
+            "transaction_test",
+            model_id,
+            "Attack",
+            99.0,
+            create_alert=True,
+        )
+
+    with db.get_connection() as connection:
+        after = {
+            table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            for table in ("network_traffic", "prediction", "alert")
+        }
+    assert after == before
 
 
 def test_system_logs_ui_loads_and_filters(authenticated_client, trained_bundle):

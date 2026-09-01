@@ -150,7 +150,12 @@ class CsvReplaySource(TrafficSource):
 
 
 class PcapReplaySource(TrafficSource):
-    """Aggregate a recorded packet capture into flows, then replay the flows."""
+    """Aggregate a recorded packet capture into replayable network flows.
+
+    Sequential replay reads packets incrementally and keeps only active and
+    immediately pending flows in memory. Random replay must buffer the complete
+    capture because shuffling inherently requires the full flow set.
+    """
 
     def __init__(
         self,
@@ -165,12 +170,17 @@ class PcapReplaySource(TrafficSource):
         self._cancel_event = cancel_event
         self._flows = []
         self._index = 0
+        self._reader = None
+        self._tracker = None
+        self._pending_flows = []
+        self._exhausted = False
         self._tracker_kwargs = {}
         if idle_timeout is not None:
             self._tracker_kwargs["idle_timeout"] = idle_timeout
         if active_timeout is not None:
             self._tracker_kwargs["active_timeout"] = active_timeout
         self.packets_read = 0
+        self.flows_emitted = 0
 
     def prepare(self):
         if self._cancel_event is not None and self._cancel_event.is_set():
@@ -186,13 +196,34 @@ class PcapReplaySource(TrafficSource):
                 "(python -m pip install -r requirements.txt)."
             ) from error
 
+        if self._order == "random":
+            self._prepare_buffered(PcapReader)
+            return
+
+        self._tracker = FlowTracker(**self._tracker_kwargs)
+        try:
+            self._reader = PcapReader(self._path)
+            first_flow = self._next_sequential_flow()
+        except TrafficSourceError:
+            self.close()
+            raise
+        except StopIteration:
+            self.close()
+            raise TrafficSourceError(
+                "The packet capture contains no classifiable IP flows."
+            ) from None
+        except Exception as error:
+            self.close()
+            raise TrafficSourceError(f"Unable to read the packet capture: {error}") from error
+        self._pending_flows.append(first_flow)
+
+    def _prepare_buffered(self, reader_type):
         tracker = FlowTracker(**self._tracker_kwargs)
         flows = []
         try:
-            with PcapReader(self._path) as reader:
+            with reader_type(self._path) as reader:
                 for packet in reader:
-                    if self._cancel_event is not None and self._cancel_event.is_set():
-                        raise TrafficSourceCancelled("Packet capture preparation was cancelled.")
+                    self._raise_if_cancelled()
                     info = packet_info_from_scapy(packet)
                     if info is None:
                         continue
@@ -202,28 +233,74 @@ class PcapReplaySource(TrafficSource):
             raise
         except Exception as error:
             raise TrafficSourceError(f"Unable to read the packet capture: {error}") from error
-        if self._cancel_event is not None and self._cancel_event.is_set():
-            raise TrafficSourceCancelled("Packet capture preparation was cancelled.")
+        self._raise_if_cancelled()
         flows.extend(tracker.flush())
 
         if not flows:
             raise TrafficSourceError("The packet capture contains no classifiable IP flows.")
-        if self._order == "random":
-            random.shuffle(flows)
-        else:
-            flows.sort(key=lambda flow: flow["last_ts"])
+        random.shuffle(flows)
         self._flows = flows
         self.row_total = len(flows)
 
-    def next_event(self, timeout=0.2):
-        if self._index >= len(self._flows):
+    def _raise_if_cancelled(self):
+        if self._cancel_event is not None and self._cancel_event.is_set():
+            raise TrafficSourceCancelled("Packet capture preparation was cancelled.")
+
+    def _next_sequential_flow(self):
+        if self._pending_flows:
+            return self._pending_flows.pop(0)
+        if self._exhausted:
+            self.row_total = self.flows_emitted
             raise StopIteration
-        flow = self._flows[self._index]
-        self._index += 1
+
+        while True:
+            self._raise_if_cancelled()
+            try:
+                packet = next(self._reader)
+            except StopIteration:
+                self._pending_flows.extend(self._tracker.flush())
+                self._exhausted = True
+                self._close_reader()
+                if self._pending_flows:
+                    return self._pending_flows.pop(0)
+                self.row_total = self.flows_emitted
+                raise
+
+            info = packet_info_from_scapy(packet)
+            if info is None:
+                continue
+            self.packets_read += 1
+            self._pending_flows.extend(self._tracker.add_packet(info))
+            if self._pending_flows:
+                return self._pending_flows.pop(0)
+
+    def next_event(self, timeout=0.2):
+        if self._order == "random":
+            if self._index >= len(self._flows):
+                raise StopIteration
+            flow = self._flows[self._index]
+            self._index += 1
+        else:
+            try:
+                flow = self._next_sequential_flow()
+            except (StopIteration, TrafficSourceError):
+                raise
+            except Exception as error:
+                self.close()
+                raise TrafficSourceError(f"Unable to read the packet capture: {error}") from error
+        self.flows_emitted += 1
         return _flow_event(flow)
 
+    def _close_reader(self):
+        if self._reader is not None:
+            self._reader.close()
+            self._reader = None
+
+    def close(self):
+        self._close_reader()
+
     def stats(self):
-        return {"packets": self.packets_read, "flows": self.row_total or 0}
+        return {"packets": self.packets_read, "flows": self.flows_emitted}
 
 
 BASE_BPF_FILTER = "ip and (tcp or udp)"
