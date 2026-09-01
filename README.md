@@ -136,6 +136,14 @@ python app.py
 
 Open `http://127.0.0.1:5000`.
 
+AlgoGuard listens on `127.0.0.1` with the debugger off by default, because it handles captured network traffic. Both are opt-in:
+
+```powershell
+$env:FLASK_DEBUG = "1"          # developer reloader and debugger
+$env:ALGOGUARD_HOST = "0.0.0.0" # reachable from other machines - only on a network you control
+$env:ALGOGUARD_PORT = "5000"    # also the port excluded from live capture
+```
+
 Default local account on a new database:
 
 ```text
@@ -207,6 +215,8 @@ For packet sources the flow tracker computes the same 15 features the model was 
 Then choose a storage mode and Start; Pause, Resume, and Stop control the session. The page polls for new classifications, so reloading the browser re-attaches to a session that is still running rather than orphaning it.
 
 **Live capture prerequisites (Windows):** install [Npcap](https://npcap.com) with the "WinPcap API-compatible mode" default, and run AlgoGuard from a terminal with Administrator rights. Without them, the monitor lists live capture as unavailable with the reason, and replay sources continue to work.
+
+AlgoGuard excludes its own web traffic from capture. Without this, monitoring the interface the application serves from would classify the browser's own status polling and the feed would fill with AlgoGuard watching itself. The exclusion covers the port from `ALGOGUARD_PORT` and is applied both in the capture filter and per packet, so it still holds when a driver cannot compile the filter. Packets skipped this way are reported as "own traffic" beside the captured-packet count.
 
 Storage modes bound how much the session writes to SQLite:
 

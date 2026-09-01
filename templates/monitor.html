@@ -302,9 +302,11 @@
                 ? Number(session.avg_detection_lag_ms).toFixed(1) + " ms avg"
                 : "N/A";
             const capture = session.capture || {};
+            const notes = [];
+            if (capture.dropped) { notes.push(formatNumber(capture.dropped) + " dropped"); }
+            if (capture.excluded) { notes.push(formatNumber(capture.excluded) + " own traffic"); }
             document.getElementById("statCapture").textContent =
-                formatNumber(capture.packets)
-                + (capture.dropped ? " (" + formatNumber(capture.dropped) + " dropped)" : "");
+                formatNumber(capture.packets) + (notes.length ? " (" + notes.join(", ") + ")" : "");
         }
 
         if (session.error_message) {

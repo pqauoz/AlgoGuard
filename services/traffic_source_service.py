@@ -209,23 +209,60 @@ class PcapReplaySource(TrafficSource):
         return {"packets": self.packets_read, "flows": self.row_total or 0}
 
 
+BASE_BPF_FILTER = "ip and (tcp or udp)"
+
+
+def algoguard_port():
+    """The TCP port the web application serves on, as app.py resolves it."""
+    try:
+        return int(os.environ.get("ALGOGUARD_PORT", "5000"))
+    except (TypeError, ValueError):
+        return 5000
+
+
+def build_capture_filter(exclude_ports=()):
+    """Build the BPF filter, excluding AlgoGuard's own web traffic by default."""
+    clauses = [BASE_BPF_FILTER]
+    for port in sorted({int(port) for port in exclude_ports if port}):
+        clauses.append(f"not port {port}")
+    return " and ".join(clauses)
+
+
 class LiveCaptureSource(TrafficSource):
-    """Sniff data packets from a network interface and emit flows as they end."""
+    """Sniff data packets from a network interface and emit flows as they end.
+
+    AlgoGuard's own web traffic is excluded from capture. Without this, running
+    a live session on the interface the application serves from makes the
+    monitor classify the browser's own status polling: the system watches
+    itself and the feed fills with its own flows. The exclusion is applied
+    twice on purpose - once in the BPF filter, and again per packet in Python,
+    because a capture driver without a libpcap backend cannot compile the
+    filter and falls back to unfiltered capture.
+    """
 
     paced = False
 
-    def __init__(self, interface, bpf_filter="ip and (tcp or udp)", idle_timeout=None):
+    def __init__(self, interface, bpf_filter=None, idle_timeout=None, exclude_ports=None):
         self._interface = interface
-        self.bpf_filter = bpf_filter
+        self.exclude_ports = (
+            {algoguard_port()} if exclude_ports is None else {int(p) for p in exclude_ports if p}
+        )
+        self.bpf_filter = (
+            bpf_filter if bpf_filter is not None else build_capture_filter(self.exclude_ports)
+        )
         self._tracker = FlowTracker(**({"idle_timeout": idle_timeout} if idle_timeout else {}))
         self._packets = queue.Queue(maxsize=10000)
         self._sniffer = None
         self._lock = threading.Lock()
         self.packets_captured = 0
         self.packets_dropped = 0
+        self.packets_excluded = 0
         self.flows_emitted = 0
         self._pending = []
         self._last_idle_check = 0.0
+
+    def _is_own_traffic(self, info):
+        return info.src_port in self.exclude_ports or info.dst_port in self.exclude_ports
 
     def _on_packet(self, packet):
         try:
@@ -306,6 +343,12 @@ class LiveCaptureSource(TrafficSource):
             return None
 
         info = packet_info_from_scapy(packet)
+        if info is not None and self._is_own_traffic(info):
+            # The BPF filter normally keeps these out; this catches them when
+            # the driver could not compile it and capture ran unfiltered.
+            with self._lock:
+                self.packets_excluded += 1
+            return None
         if info is not None:
             with self._lock:
                 self.packets_captured += 1
@@ -327,6 +370,7 @@ class LiveCaptureSource(TrafficSource):
             return {
                 "packets": self.packets_captured,
                 "dropped": self.packets_dropped,
+                "excluded": self.packets_excluded,
                 "flows": self.flows_emitted,
                 "active_flows": self._tracker.active_flows,
             }

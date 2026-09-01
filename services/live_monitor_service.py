@@ -388,6 +388,7 @@ def _worker(session, stop_event, pause_event):
 
     final_state = "completed"
     row_index = -1
+    last_capture_refresh = 0.0
     try:
         while True:
             if stop_event.is_set():
@@ -405,6 +406,14 @@ def _worker(session, stop_event, pause_event):
             except StopIteration:
                 break
             if event_data is None:
+                # A live interface can be quiet, or carry only excluded traffic,
+                # for a long time. Refresh the capture counters anyway so the
+                # page shows that capture is running before the first verdict.
+                if source_type == "live" and (time.time() - last_capture_refresh) >= 1.0:
+                    last_capture_refresh = time.time()
+                    stats_snapshot = source.stats()
+                    with _LOCK:
+                        session["capture"] = stats_snapshot
                 continue
             row_index += 1
 

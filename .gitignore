@@ -32,6 +32,10 @@ database/*
 !database/.gitignore
 !database/.gitkeep
 
+# Packet capture recordings (may contain traffic from your network)
+captures/*
+!captures/.gitkeep
+
 # Python cache
 __pycache__/
 *.py[cod]

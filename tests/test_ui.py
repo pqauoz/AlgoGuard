@@ -48,3 +48,19 @@ def test_logout_clears_session_and_back_navigation_requires_login(authenticated_
 
     logged_out_page = authenticated_client.get(logout_response.headers["Location"])
     assert "You have been securely logged out." in logged_out_page.get_data(as_text=True)
+
+
+def test_runtime_defaults_are_safe_for_local_use():
+    """Debug off and loopback-only unless the operator opts in explicitly."""
+    import re
+
+    with open("app.py") as handle:
+        source = handle.read()
+    main = source[source.index('if __name__ == "__main__":') :]
+    assert 'os.environ.get("FLASK_DEBUG", "0")' in main, "debug must default to off"
+    assert 'os.environ.get("ALGOGUARD_HOST", "127.0.0.1")' in main, (
+        "the server must default to loopback only"
+    )
+    assert not re.search(r'host="0\.0\.0\.0"', main), (
+        "0.0.0.0 must be opt-in via ALGOGUARD_HOST, not hardcoded"
+    )

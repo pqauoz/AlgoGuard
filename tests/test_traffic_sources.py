@@ -187,6 +187,50 @@ def test_monitor_rejects_bad_capture_selections(monkeypatch, tmp_path):
         monitor.start_session(1, source_type="telepathy")
 
 
+def test_capture_filter_excludes_the_application_port(monkeypatch):
+    from services.traffic_source_service import algoguard_port, build_capture_filter
+
+    monkeypatch.setenv("ALGOGUARD_PORT", "5000")
+    assert algoguard_port() == 5000
+    assert build_capture_filter({5000}) == "ip and (tcp or udp) and not port 5000"
+    assert build_capture_filter({}) == "ip and (tcp or udp)"
+
+    monkeypatch.setenv("ALGOGUARD_PORT", "not-a-port")
+    assert algoguard_port() == 5000  # falls back instead of crashing capture
+
+
+def test_live_source_defaults_to_excluding_algoguards_own_traffic(monkeypatch):
+    from services.traffic_source_service import LiveCaptureSource
+
+    monkeypatch.setenv("ALGOGUARD_PORT", "5077")
+    source = LiveCaptureSource("lo")
+    assert source.exclude_ports == {5077}
+    assert "not port 5077" in source.bpf_filter
+
+
+def test_own_traffic_is_dropped_even_when_the_bpf_filter_did_not_apply():
+    """The Python-side guard is what protects unfiltered fallback captures."""
+    from scapy.all import IP, TCP, Ether
+
+    from services.traffic_source_service import LiveCaptureSource
+
+    source = LiveCaptureSource("lo", exclude_ports={5000})
+
+    own = Ether() / IP(src="127.0.0.1", dst="127.0.0.1") / TCP(sport=44444, dport=5000, flags="S")
+    other = Ether() / IP(src="10.0.0.1", dst="10.0.0.2") / TCP(sport=44444, dport=80, flags="S")
+    own.time = other.time = 1_700_000_000.0
+
+    source._on_packet(own)
+    assert source.next_event(timeout=0.1) is None
+    assert source.packets_excluded == 1
+    assert source.packets_captured == 0
+
+    source._on_packet(other)
+    source.next_event(timeout=0.1)
+    assert source.packets_captured == 1
+    assert source.stats()["excluded"] == 1
+
+
 def test_monitor_options_advertise_all_source_types():
     options = monitor.get_options()
     values = {item["value"] for item in options["sources"]}
