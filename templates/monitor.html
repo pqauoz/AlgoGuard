@@ -352,7 +352,10 @@
                 return cell;
             }
 
-            appendTextCell(event.timestamp || "");
+            const fullTimestamp = String(event.timestamp || "");
+            const timeOnly = fullTimestamp.match(/^\d{4}-\d{2}-\d{2}[ T](\d{2}:\d{2}:\d{2})/);
+            const timeCell = appendTextCell(timeOnly ? timeOnly[1] : fullTimestamp);
+            if (timeOnly) { timeCell.title = fullTimestamp; }
             appendTextCell(sourceLabel + " → " + destinationLabel, "feed-endpoints");
             appendTextCell(event.proto || "-");
             appendTextCell(event.service || "-");

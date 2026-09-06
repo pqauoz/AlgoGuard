@@ -12,7 +12,6 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.naive_bayes import GaussianNB
 from sklearn.neighbors import KNeighborsClassifier
 
-
 RANDOM_STATE = 42
 MODEL_WORKFLOW_VERSION = "stacking-five-v3"
 

@@ -6,8 +6,8 @@ import time
 import pytest
 import scapy.all as scapy_all
 
-from services import traffic_source_service as traffic_sources
 from services import live_monitor_service as monitor
+from services import traffic_source_service as traffic_sources
 from services.traffic_source_service import (
     CsvReplaySource,
     PcapReplaySource,

@@ -21,7 +21,6 @@ from services.model_registry import (
     build_individual_estimators,
 )
 
-
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 DEFAULT_ACTIVE_MODEL_PATH = os.path.join(BASE_DIR, "saved_models", "deployed_model.joblib")
 ACTIVE_MODEL_PATH = os.path.abspath(

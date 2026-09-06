@@ -176,3 +176,34 @@ def test_prediction_api_hides_unexpected_exception_details(
         "message": "Prediction failed safely.",
     }
     assert "secret" not in response.get_data(as_text=True)
+
+
+def test_pages_work_offline_without_external_assets(client, app_module):
+    """Bootstrap is vendored under static/vendor so a demo never depends on a CDN."""
+    from pathlib import Path
+
+    root = Path(app_module.__file__).resolve().parent
+    for template in (root / "templates").glob("*.html"):
+        text = template.read_text(encoding="utf-8")
+        assert "https://" not in text and "http://" not in text, template.name
+    policy = client.get("/login").headers["Content-Security-Policy"]
+    assert "cdn.jsdelivr.net" not in policy
+    for asset in (
+        "static/vendor/bootstrap/bootstrap.min.css",
+        "static/vendor/bootstrap/bootstrap.bundle.min.js",
+        "static/vendor/bootstrap-icons/bootstrap-icons.min.css",
+        "static/vendor/bootstrap-icons/fonts/bootstrap-icons.woff2",
+    ):
+        assert (root / asset).is_file(), asset
+        assert client.get("/" + asset).status_code == 200
+
+
+def test_prediction_defaults_render_without_float_noise():
+    from services.simulation_service import _display_default
+
+    assert _display_default(0.0011849999999999999, True) == "0.001185"
+    assert _display_default(3429.2924940000003, True) == "3429.292494"
+    assert _display_default(2.0, True) == "2"
+    assert _display_default(950000.5, True) == "950000.5"
+    assert _display_default(None, True) == ""
+    assert _display_default("tcp", False) == "tcp"

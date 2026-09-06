@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 ACTIVE_PATHS = [ROOT / "app.py", ROOT / "services", ROOT / "templates"]
 

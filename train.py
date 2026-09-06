@@ -35,7 +35,6 @@ from services.model_registry import STACKING_MODEL_NAME
 from services.preprocessing_service import prepare_dataset
 from services.training_service import train_and_compare_models
 
-
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 SAVED_MODEL_FOLDER = os.path.join(BASE_DIR, "saved_models")
 REPORT_FOLDER = os.path.join(BASE_DIR, "reports")
@@ -83,7 +82,12 @@ def _print_ranked_table(model_results):
     print("-" * 78)
     print(f"{'#':<3} {'Model':<22} {'Accuracy':>10} {'F1':>10} {'ROC-AUC':>10} {'Score':>10}")
     print("-" * 78)
-    for result in model_results:
+    # Ranked individual models first (1, 2, 3 ...), then unranked rows such as Stacking.
+    ordered = sorted(
+        model_results,
+        key=lambda item: (item.get("rank") is None, item.get("rank") or 0),
+    )
+    for result in ordered:
         rank = result.get("rank")
         print(
             f"{rank if rank else '-':<3} "

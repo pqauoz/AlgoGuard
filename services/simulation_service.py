@@ -10,6 +10,23 @@ class SimulationServiceError(RuntimeError):
     """Raised when manual prediction cannot safely use the active deployment."""
 
 
+def _display_default(value, is_numeric):
+    """Render a stored feature default without float noise (0.0045000000000000005)."""
+    if value is None:
+        return ""
+    if not is_numeric:
+        return str(value)
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if not np.isfinite(number):
+        return ""
+    if number.is_integer():
+        return str(int(number))
+    return f"{number:.6f}".rstrip("0").rstrip(".")
+
+
 def get_simulation_schema():
     """Return dynamic feature metadata for the current deployed pipeline."""
     try:
@@ -24,7 +41,7 @@ def get_simulation_schema():
             "name": column,
             "label": str(column).replace("_", " ").title(),
             "type": "number" if column in numeric_columns else "text",
-            "default": defaults.get(column, ""),
+            "default": _display_default(defaults.get(column), column in numeric_columns),
         }
         for column in artifact.get("feature_columns", [])
     ]

@@ -4,7 +4,6 @@ import time
 
 import psutil
 
-
 BYTES_PER_MB = 1024 * 1024
 
 

@@ -7,7 +7,6 @@ from services import database_service as db
 from services import live_monitor_service as monitor
 from services.deployment_service import deploy_model
 
-
 DATASET = "algoguard_big.csv"
 
 

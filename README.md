@@ -83,7 +83,9 @@ AlgoGuard/
 |   |-- traffic_source_service.py
 |   `-- training_service.py
 |-- templates/
-|-- static/css/style.css
+|-- static/
+|   |-- css/          (style.css imports legacy-ui.css)
+|   `-- vendor/       (Bootstrap 5.3.3 + Bootstrap Icons, served locally)
 |-- tests/
 |-- datasets/
 |   |-- algoguard_big.csv
@@ -98,25 +100,46 @@ AlgoGuard/
 
 `app.py` serves detection only; the training services are reached through `train.py`. `uploads/` is retained for historical runtime files and is no longer written to.
 
-`research/` is an archived notebook workspace and is not imported by the Flask application.
+`research/` is an archived notebook workspace and is not imported by the Flask application. `REFACTOR_PLAN.md` documents the packet-capture refactor and its remaining research phases; `ALGOGUARD_USER_MANUAL.txt` is the end-user and demo guide.
 
 ## Installation on Windows PowerShell
 
-Run all commands from the project root, the directory containing `app.py` and `requirements.txt`:
+Requirements: Python 3.10 or newer and Git. Clone the repository, then run all commands from the project root, the directory containing `app.py` and `requirements.txt`:
 
 ```powershell
+git clone https://github.com/pqauoz/AlgoGuard.git
+cd AlgoGuard
 py -m venv venv
 .\venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-If PowerShell blocks activation, the environment can still be used directly:
+If PowerShell blocks activation (`running scripts is disabled on this system`), either allow it for the current window or call the environment's interpreter directly:
 
 ```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass   # then .\venv\Scripts\Activate.ps1
+# or
 .\venv\Scripts\python.exe -m pip install -r requirements.txt
 .\venv\Scripts\python.exe app.py
 ```
+
+The web interface is fully self-contained: Bootstrap and its icon font are vendored under `static/vendor/`, so the application runs without internet access once the Python packages are installed.
+
+## First Run on a Fresh Clone
+
+A fresh clone contains code and the sample datasets only. The trained model, the SQLite database, reports, and captures are runtime files excluded from Git, so a new installation has **no deployed model** until you train one. Do this once, in order:
+
+```powershell
+python train.py datasets\algoguard_big.csv --deploy   # ~20-60 s; trains six candidates, deploys Stacking
+python app.py                                          # start the detector
+```
+
+Open `http://127.0.0.1:5000`.
+
+The first command creates `database/algoguard.sqlite3` and prints a **one-time random password for the `admin` account** (the account is created by whichever command touches the new database first: `train.py`, `migrate.py`, or `app.py`). Copy it from the terminal before it scrolls away; it is never shown again. To pick the first credentials yourself, set `ALGOGUARD_ADMIN_USERNAME` and `ALGOGUARD_ADMIN_PASSWORD` before that first command (see Run the Application).
+
+If you open the site before training, every page explains that no model is deployed and shows the command above; nothing else is broken.
 
 ## Database Migration
 
@@ -126,7 +149,7 @@ Migrations are additive and preserve existing rows:
 python migrate.py
 ```
 
-The application also applies pending migrations at startup. Do not delete `database/algoguard.sqlite3` to upgrade an existing installation.
+The application also applies pending migrations at startup, so this command is optional; it exists for upgrading an existing installation without starting the server. Do not delete `database/algoguard.sqlite3` to upgrade an existing installation.
 
 ## Run the Application
 
@@ -144,8 +167,11 @@ $env:ALGOGUARD_HOST = "0.0.0.0" # reachable from other machines - only on a netw
 $env:ALGOGUARD_PORT = "5000"    # also the port excluded from live capture
 ```
 
+Less common overrides: `ALGOGUARD_SECURE_COOKIES=1` marks the session cookie `Secure` (only behind HTTPS); `ALGOGUARD_DATABASE_PATH` and `ALGOGUARD_DEPLOYED_MODEL_PATH` relocate the SQLite file and the active artifact, which is how the test suite and disposable installations avoid touching `database/` and `saved_models/`. Environment variables set with `$env:` last for the current PowerShell window only.
+
 On a new database, AlgoGuard creates the `admin` account with a random password
-and prints it once in the startup terminal. Store it immediately. To choose the
+and prints it once in the terminal of whichever command created the database
+(`train.py`, `migrate.py`, or `app.py`). Store it immediately. To choose the
 first account credentials yourself, set these environment values before first
 startup:
 
@@ -268,9 +294,15 @@ python -m ruff check app.py train.py migrate.py services tests
 python -m pytest -q
 ```
 
+The ruff rule set is pinned in `pyproject.toml` (`E`, `F`, `W`, `I`) so the check reports the same result on every ruff release. The test suite uses temporary database and artifact paths, so it never modifies `database/` or `saved_models/`; expect it to take under a minute because it trains small models.
+
 ## Troubleshooting
 
 `ModuleNotFoundError`: activate the same virtual environment where dependencies were installed, or invoke `.\venv\Scripts\python.exe` directly.
+
+Lost the admin password on a fresh installation: stop the server, delete `database/algoguard.sqlite3` (only if it holds nothing you need), set `ALGOGUARD_ADMIN_USERNAME` and `ALGOGUARD_ADMIN_PASSWORD`, and start again; the new database is seeded with those credentials. Redeploy the model afterwards because the deployment record lived in the deleted database.
+
+`python` opens the Microsoft Store or is not recognised: use `py` instead of `python` for the `venv` step, then run everything through the activated environment.
 
 Invalid CSV: confirm the file is CSV, the target is last, exactly two target classes exist, and both classes have enough rows.
 

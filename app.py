@@ -262,9 +262,9 @@ def prevent_dynamic_page_caching(response):
         response.headers["Expires"] = "0"
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
-        f"script-src 'self' 'nonce-{csp_nonce()}' https://cdn.jsdelivr.net; "
-        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
-        "font-src 'self' https://cdn.jsdelivr.net data:; "
+        f"script-src 'self' 'nonce-{csp_nonce()}'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "font-src 'self' data:; "
         "img-src 'self' data:; connect-src 'self'; object-src 'none'; "
         "base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
     )

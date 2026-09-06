@@ -6,7 +6,6 @@ import numpy as np
 import pandas as pd
 import pytest
 
-
 TEST_RUNTIME = Path(tempfile.mkdtemp(prefix="algoguard-tests-"))
 os.environ["ALGOGUARD_DATABASE_PATH"] = str(TEST_RUNTIME / "test.sqlite3")
 os.environ["ALGOGUARD_DEPLOYED_MODEL_PATH"] = str(TEST_RUNTIME / "models" / "deployed_model.joblib")

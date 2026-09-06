@@ -71,7 +71,9 @@ It has two detection modes:
 1. Live Monitor
    Streams network flows through the deployed model one at a time and shows
    each verdict as it happens, with running attack/normal statistics, a
-   timeline chart, and automatic alerts.
+   timeline chart, and automatic alerts. Flows can come from three sources:
+   live packet capture on a network interface, a recorded .pcap file, or the
+   bundled labelled UNSW-NB15 samples.
 
 2. Manual Prediction
    Type one network traffic example by hand and let the active deployed
@@ -81,23 +83,39 @@ Retraining is done offline with train.py. The website has no upload or
 training page: the finished product runs the model, it does not build it.
 
 Important:
-AlgoGuard does not capture live network packets from your Wi-Fi or LAN. The
-Live Monitor replays labelled traffic samples through the model in real time,
-which shows continuous detection without needing a capture driver.
+Live capture reads real packets from the selected network card, groups them
+into flows, and classifies each flow when it ends. It needs the Npcap driver
+and an Administrator terminal on Windows (see section 4). Without them the
+two replay sources still work, so a demo never depends on the driver.
+AlgoGuard only observes traffic: it never blocks anything and stores flow
+metadata only, never packet contents. Capture only on networks you are
+authorized to monitor.
 
 
 2. HOW TO RUN ALGOGUARD
 -----------------------
 
-Open a terminal in the project folder:
+Open a PowerShell terminal in the project folder (the folder that contains
+app.py and requirements.txt).
 
-C:\Users\Client\Documents\AlgoGuard
+First time only (fresh clone from GitHub):
 
-Then run:
+    py -m venv venv
+    .\venv\Scripts\Activate.ps1
+    python -m pip install -r requirements.txt
+    python train.py datasets\algoguard_big.csv --deploy
 
-venv\Scripts\activate
-python -m pip install -r requirements.txt
-python app.py
+The last command is required once: the trained model is not stored in Git, so
+a fresh clone has no deployed model until you train one (about 20-60 seconds).
+It also creates the database and prints the one-time admin password described
+below. If PowerShell refuses to run Activate.ps1, run
+"Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass" first, or call
+.\venv\Scripts\python.exe directly instead of python.
+
+Every time after that:
+
+    .\venv\Scripts\Activate.ps1
+    python app.py
 
 if python is not on path, run with the existing virtual environment
 .\venv\Scripts\python.exe app.py
@@ -106,13 +124,17 @@ Then open:
 
 http://localhost:5000
 
+The website needs no internet connection: all styling is bundled with the
+project.
+
 First local login on a new database:
 
 Username:
 admin
 
 Password:
-Read the one-time random password printed in the startup terminal.
+Read the one-time random password printed in the terminal by whichever
+command created the database first (train.py, migrate.py, or app.py).
 
 Important:
 The default admin is created only when the local SQLite database is first
@@ -124,9 +146,9 @@ settings do not change an account already stored in the database.
 After logging in with an Administrator account, open the Admins page to create
 more admin accounts. Each new admin is stored in SQLite with a hashed password.
 
-If port 5000 is busy:
+If port 5000 is busy (PowerShell):
 
-set ALGOGUARD_PORT=5001
+$env:ALGOGUARD_PORT = "5001"
 python app.py
 
 Then open:
@@ -167,10 +189,35 @@ Logs
 4. LIVE MONITOR: WATCHING DETECTION HAPPEN
 ------------------------------------------
 
-Open the Live Monitor page and choose four settings, then press Start.
+Open the Live Monitor page, choose the settings, then press Start Monitoring.
 
 Traffic source
-    Which bundled sample to stream: 5,000, 10,000, or 20,000 flows.
+    Sample replay (labelled flows)
+        Streams one of the bundled UNSW-NB15 samples: 5,000, 10,000, or
+        20,000 flows. Each row keeps its true label, so the feed can show
+        whether every verdict was right. This is the safest choice for a
+        demonstration and needs no driver.
+    Recorded packets (PCAP)
+        Replays a .pcap, .pcapng, or .cap file placed in the captures/ folder.
+        The packets are grouped into flows by AlgoGuard's flow tracker and
+        classified at the chosen speed. Packet files carry no labels, so the
+        Actual column shows a dash.
+    Live interface capture
+        Sniffs the selected network card in real time. A flow is classified
+        when its TCP connection closes, after 15 seconds of silence, or every
+        120 seconds for long connections, so the first verdicts appear a few
+        seconds after Start, not instantly. Live mode runs at wire pace
+        (speed and order do not apply) and shows detection lag plus captured
+        and dropped packet counts. Requirements on Windows: install Npcap
+        from https://npcap.com with its default "WinPcap API-compatible
+        mode", and start AlgoGuard from a terminal opened as Administrator.
+        If either is missing, the page says why live capture is unavailable
+        and the replay sources keep working. AlgoGuard ignores its own web
+        traffic so the feed does not fill with the browser polling the page.
+
+Sample dataset / Capture file / Network interface
+    The second control changes with the source: which bundled sample, which
+    .pcap file, or which interface to use.
 
 Replay speed
     Slow is one flow every 2 seconds, Normal is one flow per second, and Fast
@@ -194,8 +241,10 @@ While a session runs you will see:
     - A timeline chart where each bar is one moment in time, split into the
       normal portion and the attack portion.
     - A feed table of the most recent flows, newest at the top, showing the
-      verdict, the model's confidence, and the true label recorded in the
+      time, source and destination, protocol, service, verdict, the model's
+      confidence, and (for sample replay) the true label recorded in the
       dataset. A true label shown in amber means the model got that one wrong.
+      Packet sources show real addresses and ports and a dash for Actual.
 
 Pause freezes the stream without ending the session, Resume continues it, and
 Stop ends it. Refreshing your browser during a session is safe: the page
@@ -432,11 +481,12 @@ down live detection.
 
 If asked whether it monitors real traffic:
 
-It runs a real trained model on real labelled network traffic, flow by flow,
-and produces genuine predictions and alerts. It does not sniff packets off the
-network card. The flows are replayed from the UNSW-NB15 dataset rather than
-captured live, which is why the Live Monitor can also show whether each
-prediction was correct.
+Yes. In live mode it captures packets from the network card, groups them into
+bidirectional flows, computes the same 15 features the model was trained on,
+and classifies each flow the moment it ends. The same pipeline also replays
+recorded .pcap files and the labelled UNSW-NB15 samples; the labelled replay
+is what lets the Live Monitor show whether each prediction was correct, which
+captured traffic cannot do because nobody has labelled it yet.
 
 If asked what happens when an anomaly is detected:
 
@@ -451,7 +501,8 @@ page, and the whole sequence is recorded in the audit log.
 
 Before presenting:
 
-1. Open terminal in the project root.
+1. Open a terminal in the project root (as Administrator if you plan to show
+   live capture, and make sure Npcap is installed).
 2. Activate venv.
 3. Install requirements.
 4. Confirm a model is deployed (the Dashboard shows the Deployed Model card).
@@ -459,12 +510,14 @@ Before presenting:
 5. Run python app.py.
 6. Open http://localhost:5000.
 7. Show the Dashboard: deployed model, metrics, flows analyzed, alerts.
-8. Open Live Monitor, start a session at Normal speed, and narrate the feed as
-   attacks appear.
-9. Show the Alerts page filling up from that session.
-10. Try a Predict normal input.
-11. Try a Predict anomaly input.
-12. Show the Logs page to prove every step was audited.
+8. Open Live Monitor, start a Sample replay session at Normal speed, and
+   narrate the feed as attacks appear; point out the Actual column.
+9. Optionally switch to Live interface capture and browse a website on the
+   same machine; verdicts appear as connections close.
+10. Show the Alerts page filling up from that session.
+11. Try a Predict normal input.
+12. Try a Predict anomaly input.
+13. Show the Logs page to prove every step was audited.
 
 
 14. FUTURE IMPROVEMENTS
@@ -474,8 +527,9 @@ Possible future features:
 
 1. Add admin notification for anomalies.
 2. Add downloadable PDF reports.
-3. Add live packet capture using tools such as Scapy or PyShark, feeding the
-   same detection path the Live Monitor already uses.
+3. Export flows metered by AlgoGuard's own flow tracker to a labelled CSV so
+   the model can be retrained on traffic from the network it protects
+   (train.py already accepts such a file).
 4. Add retraining from reviewed prediction records.
 5. Add per-attack-category classification instead of binary Normal/Attack.
 
@@ -902,7 +956,9 @@ saved_models/deployed_model.joblib
 reports/training_run_<run_id>_model_results.csv
 database/algoguard.sqlite3
 
-These generated files are ignored by Git so the repository stays clean.
+These generated files are ignored by Git so the repository stays clean, and
+so are any .pcap recordings you place in captures/. This is why a fresh clone
+must run train.py --deploy once before the website has a model.
 
 The SQLite database stores:
 
@@ -933,6 +989,10 @@ system_log
     Login, logout, training, deployment, live monitoring, and prediction
     activity records.
 
+capture_session
+    One row per live interface capture: interface, start and end time,
+    packets captured and dropped, and flows classified.
+
 
 30. SIMPLEST TEST CSV
 ---------------------
@@ -953,7 +1013,7 @@ Save it as:
 
 quick_test.csv
 
-Then train on it with: python train.py sample_network_traffic.csv
+Then train on it with: python train.py quick_test.csv
 
 
 31. HOW TO CREATE A CSV FILE

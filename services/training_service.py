@@ -6,11 +6,11 @@ import numpy as np
 from sklearn.pipeline import Pipeline
 
 from services.evaluation_service import (
+    calculate_metrics,
     identify_best_model,
     normalize_model_results,
     rank_model_results,
 )
-from services.evaluation_service import calculate_metrics
 from services.model_registry import (
     MODEL_WORKFLOW_VERSION,
     build_model_candidates,

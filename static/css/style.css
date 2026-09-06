@@ -180,10 +180,11 @@
     background: rgba(34, 211, 238, 0.1);
 }
 
-.description-cell {
-    min-width: 180px;
-    max-width: 360px;
+.table td.description-cell {
+    min-width: 220px;
+    max-width: 420px;
     white-space: normal;
+    overflow-wrap: anywhere;
 }
 
 .filter-panel {
@@ -610,7 +611,7 @@ code {
 
 .monitor-control-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(255px, 1fr));
     gap: 1rem;
     margin-bottom: 1.25rem;
 }
@@ -709,8 +710,14 @@ code {
 
 .feed-table td,
 .feed-table th {
-    font-size: 0.85rem;
+    font-size: 0.82rem;
+    padding-right: 0.45rem;
+    padding-left: 0.45rem;
     white-space: nowrap;
+}
+
+.feed-table .feed-endpoints {
+    font-size: 0.76rem;
 }
 
 .feed-endpoints {

@@ -10,7 +10,6 @@ from sklearn.metrics import (
     roc_auc_score,
 )
 
-
 METRIC_DIRECTIONS = {
     "accuracy": "higher",
     "precision": "higher",

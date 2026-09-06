@@ -3,7 +3,6 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-
 DATASET_FOLDER = Path(__file__).resolve().parents[1] / "datasets"
 EXPECTED_COLUMNS = [
     "dur",

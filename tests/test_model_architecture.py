@@ -10,7 +10,6 @@ from services.model_registry import (
     safe_model_filename,
 )
 
-
 EXPECTED_NAMES = (
     "Random Forest",
     "Gradient Boosting",
